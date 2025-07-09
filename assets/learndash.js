@@ -1,5 +1,5 @@
 /**
- * LearnDash Reports JavaScript
+ * Updated LearnDash Reports JavaScript - Fixed to handle LDTT data properly
  * 
  * @package Wbcom_Reports
  */
@@ -222,12 +222,44 @@ jQuery(document).ready(function($) {
                     <td colspan="8" class="text-center">
                         <div class="no-data-message">
                             <p><em>No learning data found with the current filters.</em></p>
-                            <p><small>Try adjusting your filter criteria.</small></p>
+                            <p><small>Users need to be enrolled in courses and have progress data.</small></p>
+                            <p><small>Try switching to "All Learners" filter or create test data using LearnDash Testing Toolkit.</small></p>
                         </div>
                     </td>
                 </tr>
             `);
         }
+    }
+    
+    function formatCourseProgress(courseProgress) {
+        if (!courseProgress || !Array.isArray(courseProgress) || courseProgress.length === 0) {
+            return '<small class="text-muted">No progress data</small>';
+        }
+        
+        let progressHtml = '<div class="course-progress-list">';
+        
+        // Show first 3 courses, then summarize if more
+        const showCount = Math.min(3, courseProgress.length);
+        
+        for (let i = 0; i < showCount; i++) {
+            const course = courseProgress[i];
+            const progressClass = getProgressClass(course.progress + '%');
+            
+            progressHtml += `
+                <div class="course-progress-item">
+                    <small class="course-name">${escapeHtml(course.course_title)}</small>
+                    <span class="progress-badge ${progressClass}">${course.progress}%</span>
+                </div>
+            `;
+        }
+        
+        if (courseProgress.length > 3) {
+            progressHtml += `<small class="text-muted">+${courseProgress.length - 3} more courses</small>`;
+        }
+        
+        progressHtml += '</div>';
+        
+        return progressHtml;
     }
     
     function updateCourseAnalytics(courseAnalytics) {
@@ -278,7 +310,8 @@ jQuery(document).ready(function($) {
                     <td colspan="7" class="text-center">
                         <div class="no-data-message">
                             <p><em>No course analytics data available.</em></p>
-                            <p><small>Make sure LearnDash is properly configured and users have enrolled in courses.</small></p>
+                            <p><small>Make sure LearnDash courses exist and users are enrolled.</small></p>
+                            <p><small>Create test data using LearnDash Testing Toolkit for demo purposes.</small></p>
                         </div>
                     </td>
                 </tr>
@@ -295,6 +328,7 @@ jQuery(document).ready(function($) {
                     <h3>No Completion Trends Available</h3>
                     <p><em>No course completion data found.</em></p>
                     <p><small>Data will appear here once users start completing courses.</small></p>
+                    <p><small>Use LearnDash Testing Toolkit to create test users with progress.</small></p>
                 </div>
             `);
         }
@@ -315,13 +349,14 @@ jQuery(document).ready(function($) {
                 <div class="text-center no-data-message" style="padding: 100px;">
                     <h3>No Course Data Available</h3>
                     <p>Create courses and enroll users to see analytics here.</p>
+                    <p><small>Use LearnDash Testing Toolkit to generate test data.</small></p>
                 </div>
             `);
             return;
         }
         
         const chartData = {
-            labels: data.map(course => course.course_name.substring(0, 20) + '...'),
+            labels: data.map(course => course.course_name.substring(0, 20) + (course.course_name.length > 20 ? '...' : '')),
             datasets: [{
                 label: 'Enrolled',
                 data: data.map(course => course.enrolled_users || 0),
@@ -333,6 +368,12 @@ jQuery(document).ready(function($) {
                 data: data.map(course => course.completed || 0),
                 backgroundColor: 'rgba(75, 192, 192, 0.5)',
                 borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 2
+            }, {
+                label: 'In Progress',
+                data: data.map(course => course.in_progress || 0),
+                backgroundColor: 'rgba(255, 206, 86, 0.5)',
+                borderColor: 'rgba(255, 206, 86, 1)',
                 borderWidth: 2
             }]
         };
@@ -354,7 +395,10 @@ jQuery(document).ready(function($) {
                 },
                 scales: {
                     y: {
-                        beginAtZero: true
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1
+                        }
                     }
                 }
             }
@@ -376,13 +420,19 @@ jQuery(document).ready(function($) {
                 <div class="text-center no-data-message" style="padding: 100px;">
                     <h3>No Completion Trends Available</h3>
                     <p>Course completion data will appear here over time.</p>
+                    <p><small>Create test users with progress using LearnDash Testing Toolkit.</small></p>
                 </div>
             `);
             return;
         }
         
         const chartData = {
-            labels: data.map(item => item.month),
+            labels: data.map(item => {
+                // Format month nicely
+                const [year, month] = item.month.split('-');
+                const date = new Date(year, month - 1);
+                return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+            }),
             datasets: [{
                 label: 'Course Completions',
                 data: data.map(item => item.completions || 0),
@@ -408,7 +458,10 @@ jQuery(document).ready(function($) {
                 },
                 scales: {
                     y: {
-                        beginAtZero: true
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1
+                        }
                     }
                 }
             }
@@ -450,6 +503,24 @@ jQuery(document).ready(function($) {
         showSuccessMessage('Export started! Your download should begin shortly.');
     }
     
+    function showLearnDashNotActiveMessage() {
+        const $container = $('.wbcom-stats-container');
+        const messageHtml = `
+            <div class="notice notice-warning">
+                <h3>LearnDash Not Active</h3>
+                <p>LearnDash plugin is not active or not detected. To view learning reports:</p>
+                <ul>
+                    <li>Make sure LearnDash is installed and activated</li>
+                    <li>Check if the LearnDash Testing Toolkit has created test data</li>
+                    <li>Verify that courses and users exist in your system</li>
+                </ul>
+                <p><strong>For testing:</strong> Use the LearnDash Testing Toolkit to create sample courses, users, and progress data.</p>
+            </div>
+        `;
+        
+        $container.html(messageHtml);
+    }
+    
     function getProgressClass(progressRate) {
         const rate = parseFloat(progressRate);
         if (rate >= 80) return 'progress-excellent';
@@ -475,7 +546,7 @@ jQuery(document).ready(function($) {
         
         if (currentTab === 'user-progress') {
             $('#user-learning-stats-table tbody').html(`
-                <tr><td colspan="7" class="text-center wbcom-loading">Loading learning progress...</td></tr>
+                <tr><td colspan="8" class="text-center wbcom-loading">Loading learning progress...</td></tr>
             `);
         } else if (currentTab === 'course-analytics') {
             $('#course-analytics-table tbody').html(`
@@ -554,17 +625,19 @@ jQuery(document).ready(function($) {
     if (!$('#learndash-dynamic-styles').length) {
         $('head').append(`
             <style id="learndash-dynamic-styles">
-                .progress-container {
-                    display: flex;
-                    align-items: center;
-                    gap: 10px;
+                .course-progress-container {
+                    max-width: 250px;
+                }
+                .avg-progress {
+                    margin-bottom: 8px;
                 }
                 .progress-bar {
-                    flex: 1;
+                    width: 100%;
                     height: 8px;
                     background: #f0f0f0;
                     border-radius: 4px;
                     overflow: hidden;
+                    margin-top: 4px;
                 }
                 .progress-fill {
                     height: 100%;
@@ -578,8 +651,45 @@ jQuery(document).ready(function($) {
                 .progress-average.progress-fill { background: #ffb900; }
                 .progress-poor { color: #dc3232; }
                 .progress-poor.progress-fill { background: #dc3232; }
+                
+                .course-progress-list {
+                    max-height: 120px;
+                    overflow-y: auto;
+                }
+                .course-progress-item {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 4px;
+                    padding: 2px 0;
+                    border-bottom: 1px solid #f0f0f0;
+                }
+                .course-progress-item:last-child {
+                    border-bottom: none;
+                }
+                .course-name {
+                    flex: 1;
+                    margin-right: 8px;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                .progress-badge {
+                    font-weight: bold;
+                    font-size: 11px;
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                    background: #f0f0f0;
+                }
+                
                 .course-count, .completion-count { font-size: 16px; }
                 .rating { font-weight: bold; }
+                .no-data-message {
+                    padding: 40px 20px;
+                    color: #666;
+                    line-height: 1.6;
+                }
+                .text-muted { color: #666; }
             </style>
         `);
     }
