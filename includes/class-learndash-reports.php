@@ -64,6 +64,7 @@ class Wbcom_Reports_LearnDash {
                         <div class="wbcom-tab-nav">
                             <button class="tab-button active" data-tab="user-progress"><?php _e('User Progress', 'wbcom-reports'); ?></button>
                             <button class="tab-button" data-tab="course-analytics"><?php _e('Course Analytics', 'wbcom-reports'); ?></button>
+                            <button class="tab-button" data-tab="group-reports"><?php _e('Group Reports', 'wbcom-reports'); ?></button>
                             <button class="tab-button" data-tab="completion-rates"><?php _e('Completion Rates', 'wbcom-reports'); ?></button>
                         </div>
                         
@@ -132,6 +133,44 @@ class Wbcom_Reports_LearnDash {
                             </div>
                         </div>
                         
+                        <div id="group-reports" class="tab-content">
+                            <div class="wbcom-user-stats">
+                                <h2><?php _e('LearnDash Group Reports', 'wbcom-reports'); ?></h2>
+                                <div class="wbcom-filters">
+                                    <select id="group-filter">
+                                        <option value="all"><?php _e('All Groups', 'wbcom-reports'); ?></option>
+                                        <option value="with_leaders"><?php _e('Groups with Leaders', 'wbcom-reports'); ?></option>
+                                        <option value="active"><?php _e('Active Groups', 'wbcom-reports'); ?></option>
+                                    </select>
+                                    <button id="apply-group-filters" class="button"><?php _e('Apply Filters', 'wbcom-reports'); ?></button>
+                                </div>
+                                
+                                <div class="wbcom-chart-container">
+                                    <canvas id="group-enrollment-chart"></canvas>
+                                </div>
+                                
+                                <table id="group-analytics-table" class="widefat fixed striped">
+                                    <thead>
+                                        <tr>
+                                            <th><?php _e('Group Name', 'wbcom-reports'); ?></th>
+                                            <th><?php _e('Group Leaders', 'wbcom-reports'); ?></th>
+                                            <th><?php _e('Total Users', 'wbcom-reports'); ?></th>
+                                            <th><?php _e('Associated Courses', 'wbcom-reports'); ?></th>
+                                            <th><?php _e('Avg. Progress', 'wbcom-reports'); ?></th>
+                                            <th><?php _e('Completed Users', 'wbcom-reports'); ?></th>
+                                            <th><?php _e('Created Date', 'wbcom-reports'); ?></th>
+                                            <th><?php _e('Status', 'wbcom-reports'); ?></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td colspan="8"><?php _e('Loading...', 'wbcom-reports'); ?></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
                         <div id="completion-rates" class="tab-content">
                             <div class="wbcom-user-stats">
                                 <h2><?php _e('Monthly Completion Rates', 'wbcom-reports'); ?></h2>
@@ -181,6 +220,8 @@ class Wbcom_Reports_LearnDash {
                 $stats['user_stats'] = $this->get_user_learning_stats($filter, $course_id);
             } elseif ($tab === 'course-analytics') {
                 $stats['course_analytics'] = $this->get_course_analytics();
+            } elseif ($tab === 'group-reports') {
+                $stats['group_analytics'] = $this->get_group_analytics($filter);
             } elseif ($tab === 'completion-rates') {
                 $stats['completion_trends'] = $this->get_completion_trends();
             }
@@ -762,6 +803,175 @@ class Wbcom_Reports_LearnDash {
         });
         
         return $trends;
+    }
+    
+    /**
+     * Get LearnDash group analytics
+     */
+    private function get_group_analytics($filter = 'all') {
+        $group_post_type = 'groups';
+        if (function_exists('learndash_get_post_type_slug')) {
+            $group_post_type = learndash_get_post_type_slug('group');
+        }
+        
+        $groups_args = array(
+            'post_type' => $group_post_type,
+            'numberposts' => -1,
+            'post_status' => 'publish',
+            'orderby' => 'title',
+            'order' => 'ASC'
+        );
+        
+        $groups = get_posts($groups_args);
+        
+        if (empty($groups)) {
+            return array();
+        }
+        
+        $analytics = array();
+        
+        foreach ($groups as $group) {
+            $group_data = $this->get_group_data($group->ID);
+            
+            // Apply filters
+            if ($filter === 'with_leaders' && empty($group_data['leaders'])) {
+                continue;
+            }
+            if ($filter === 'active' && $group_data['total_users'] === 0) {
+                continue;
+            }
+            
+            $analytics[] = array(
+                'group_name' => $group->post_title,
+                'group_leaders' => $group_data['leaders_names'],
+                'total_users' => $group_data['total_users'],
+                'associated_courses' => $group_data['courses_count'],
+                'avg_progress' => $group_data['avg_progress'],
+                'completed_users' => $group_data['completed_users'],
+                'created_date' => date('Y-m-d', strtotime($group->post_date)),
+                'status' => $group_data['status']
+            );
+        }
+        
+        return $analytics;
+    }
+    
+    /**
+     * Get comprehensive group data
+     */
+    private function get_group_data($group_id) {
+        // Get group leaders
+        $leaders = array();
+        $leaders_names = 'No Leaders';
+        
+        if (function_exists('learndash_get_groups_administrators')) {
+            $group_leaders = learndash_get_groups_administrators($group_id);
+            if (!empty($group_leaders)) {
+                foreach ($group_leaders as $leader_id) {
+                    $leader = get_user_by('ID', $leader_id);
+                    if ($leader) {
+                        $leaders[] = $leader->display_name;
+                    }
+                }
+                $leaders_names = implode(', ', $leaders);
+            }
+        }
+        
+        // Get group users
+        $group_users = array();
+        $total_users = 0;
+        
+        if (function_exists('learndash_get_groups_users')) {
+            $group_users = learndash_get_groups_users($group_id);
+            $total_users = is_array($group_users) ? count($group_users) : 0;
+        }
+        
+        // Get associated courses
+        $courses_count = 0;
+        $group_courses = array();
+        
+        if (function_exists('learndash_group_enrolled_courses')) {
+            $group_courses = learndash_group_enrolled_courses($group_id);
+            $courses_count = is_array($group_courses) ? count($group_courses) : 0;
+        }
+        
+        // Calculate average progress and completed users
+        $avg_progress = '0%';
+        $completed_users = 0;
+        
+        if (!empty($group_users) && !empty($group_courses)) {
+            $total_progress = 0;
+            $progress_count = 0;
+            
+            foreach ($group_users as $user_id) {
+                $user_completed_courses = 0;
+                $user_total_progress = 0;
+                $user_course_count = 0;
+                
+                foreach ($group_courses as $course_id) {
+                    // Check LDTT progress first
+                    $ldtt_progress = get_user_meta($user_id, '_ldtt_progress_course_' . $course_id, true);
+                    if (!empty($ldtt_progress)) {
+                        $progress_data = maybe_unserialize($ldtt_progress);
+                        if (is_array($progress_data) && isset($progress_data['completion_rate'])) {
+                            $completion_rate = floatval($progress_data['completion_rate']);
+                            $user_total_progress += $completion_rate;
+                            $user_course_count++;
+                            
+                            if ($completion_rate >= 100) {
+                                $user_completed_courses++;
+                            }
+                        }
+                    } else {
+                        // Check regular LearnDash progress
+                        if (function_exists('learndash_course_progress')) {
+                            $course_progress = learndash_course_progress($user_id, $course_id);
+                            if (is_array($course_progress)) {
+                                $completion_percentage = isset($course_progress['percentage']) ? $course_progress['percentage'] : 0;
+                                $user_total_progress += $completion_percentage;
+                                $user_course_count++;
+                                
+                                if ($completion_percentage >= 100) {
+                                    $user_completed_courses++;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if ($user_course_count > 0) {
+                    $total_progress += ($user_total_progress / $user_course_count);
+                    $progress_count++;
+                    
+                    // If user completed all courses in the group
+                    if ($user_completed_courses === $courses_count && $courses_count > 0) {
+                        $completed_users++;
+                    }
+                }
+            }
+            
+            if ($progress_count > 0) {
+                $avg_progress = round($total_progress / $progress_count, 1) . '%';
+            }
+        }
+        
+        // Determine group status
+        $status = 'Active';
+        if ($total_users === 0) {
+            $status = 'Empty';
+        } elseif ($courses_count === 0) {
+            $status = 'No Courses';
+        }
+        
+        return array(
+            'leaders' => $leaders,
+            'leaders_names' => $leaders_names,
+            'total_users' => $total_users,
+            'courses_count' => $courses_count,
+            'avg_progress' => $avg_progress,
+            'completed_users' => $completed_users,
+            'status' => $status
+        );
     }
 }
 

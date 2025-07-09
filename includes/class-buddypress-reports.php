@@ -149,7 +149,7 @@ class Wbcom_Reports_BuddyPress {
     }
     
     /**
-     * Get total activities count - if BP activities exist, otherwise count user activities
+     * Get total activities count - from BP database tables only
      */
     private function get_total_activities() {
         global $wpdb;
@@ -157,22 +157,20 @@ class Wbcom_Reports_BuddyPress {
         // Check if BuddyPress activity table exists
         $bp_activity_table = $wpdb->prefix . 'bp_activity';
         if ($wpdb->get_var("SHOW TABLES LIKE '{$bp_activity_table}'") == $bp_activity_table) {
-            $count = $wpdb->get_var("SELECT COUNT(*) FROM {$bp_activity_table} WHERE component = 'activity' AND type = 'activity_update'");
+            // Count all activity types including updates, comments, friendships, etc.
+            $count = $wpdb->get_var("
+                SELECT COUNT(*) 
+                FROM {$bp_activity_table} 
+                WHERE component IN ('activity', 'groups', 'friends', 'blogs')
+            ");
             return intval($count);
         }
         
-        // Fallback: count based on user activity from LDTT
-        $ldtt_activities = $wpdb->get_var("
-            SELECT COUNT(*) 
-            FROM {$wpdb->usermeta} 
-            WHERE meta_key LIKE '_ldtt_progress%'
-        ");
-        
-        return intval($ldtt_activities);
+        return 0;
     }
     
     /**
-     * Get total activity comments - if BP exists, otherwise count progress activities
+     * Get total activity comments - from BP database tables only
      */
     private function get_total_activity_comments() {
         global $wpdb;
@@ -180,19 +178,15 @@ class Wbcom_Reports_BuddyPress {
         // Check if BuddyPress activity table exists
         $bp_activity_table = $wpdb->prefix . 'bp_activity';
         if ($wpdb->get_var("SHOW TABLES LIKE '{$bp_activity_table}'") == $bp_activity_table) {
-            $count = $wpdb->get_var("SELECT COUNT(*) FROM {$bp_activity_table} WHERE component = 'activity' AND type = 'activity_comment'");
+            $count = $wpdb->get_var("
+                SELECT COUNT(*) 
+                FROM {$bp_activity_table} 
+                WHERE type = 'activity_comment'
+            ");
             return intval($count);
         }
         
-        // Fallback: count completed courses as "interactions"
-        $completed_courses = $wpdb->get_var("
-            SELECT COUNT(*) 
-            FROM {$wpdb->usermeta} 
-            WHERE meta_key LIKE '_ldtt_progress_course_%' 
-            AND meta_value LIKE '%completion_rate\";i:100%'
-        ");
-        
-        return intval($completed_courses);
+        return 0;
     }
     
     /**

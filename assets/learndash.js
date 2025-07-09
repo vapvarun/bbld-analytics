@@ -54,6 +54,15 @@ jQuery(document).ready(function($) {
         $('#course-filter').on('change', function() {
             currentCourseFilter = $(this).val();
         });
+        
+        $('#group-filter').on('change', function() {
+            currentFilter = $(this).val();
+        });
+        
+        // Apply group filters
+        $('#apply-group-filters').on('click', function() {
+            applyGroupFilters();
+        });
     }
     
     function initTabs() {
@@ -128,6 +137,9 @@ jQuery(document).ready(function($) {
                 break;
             case 'course-analytics':
                 updateCourseAnalytics(data.course_analytics || []);
+                break;
+            case 'group-reports':
+                updateGroupAnalytics(data.group_analytics || []);
                 break;
             case 'completion-rates':
                 updateCompletionTrends(data.completion_trends || []);
@@ -319,6 +331,74 @@ jQuery(document).ready(function($) {
         }
     }
     
+    function updateGroupAnalytics(groupAnalytics) {
+        // Update group analytics table
+        const $tableBody = $('#group-analytics-table tbody');
+        $tableBody.empty();
+        
+        if (groupAnalytics && groupAnalytics.length > 0) {
+            groupAnalytics.forEach(function(group, index) {
+                const statusClass = getGroupStatusClass(group.status);
+                
+                const row = `
+                    <tr class="fade-in" style="animation-delay: ${index * 0.1}s">
+                        <td>
+                            <strong>${escapeHtml(group.group_name)}</strong>
+                        </td>
+                        <td>
+                            <small>${escapeHtml(group.group_leaders)}</small>
+                        </td>
+                        <td>
+                            <span class="user-count font-bold text-primary">
+                                ${formatNumber(group.total_users)}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="course-count text-success">
+                                ${formatNumber(group.associated_courses)}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="${getProgressClass(group.avg_progress)}">
+                                ${group.avg_progress}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="completed-count text-success font-bold">
+                                ${formatNumber(group.completed_users)}
+                            </span>
+                        </td>
+                        <td>
+                            <small>${formatDate(group.created_date)}</small>
+                        </td>
+                        <td>
+                            <span class="status-badge ${statusClass}">
+                                ${escapeHtml(group.status)}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+                $tableBody.append(row);
+            });
+            
+            // Create group enrollment chart
+            createGroupEnrollmentChart(groupAnalytics);
+            
+        } else {
+            $tableBody.append(`
+                <tr>
+                    <td colspan="8" class="text-center">
+                        <div class="no-data-message">
+                            <p><em>No group analytics data available.</em></p>
+                            <p><small>Make sure LearnDash groups exist and users are enrolled.</small></p>
+                            <p><small>Create test groups using LearnDash Testing Toolkit for demo purposes.</small></p>
+                        </div>
+                    </td>
+                </tr>
+            `);
+        }
+    }
+    
     function updateCompletionTrends(completionTrends) {
         if (completionTrends && completionTrends.length > 0) {
             createCompletionTrendsChart(completionTrends);
@@ -388,6 +468,77 @@ jQuery(document).ready(function($) {
                     title: {
                         display: true,
                         text: 'Course Enrollment vs Completion'
+                    },
+                    legend: {
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    function createGroupEnrollmentChart(data) {
+        const ctx = document.getElementById('group-enrollment-chart');
+        if (!ctx) return;
+        
+        // Destroy existing chart
+        if (window.groupChart) {
+            window.groupChart.destroy();
+        }
+        
+        // Handle empty data
+        if (!data || data.length === 0) {
+            $(ctx).closest('.wbcom-chart-container').html(`
+                <div class="text-center no-data-message" style="padding: 100px;">
+                    <h3>No Group Data Available</h3>
+                    <p>Create LearnDash groups and enroll users to see analytics here.</p>
+                    <p><small>Use LearnDash Testing Toolkit to generate test groups and enrollments.</small></p>
+                </div>
+            `);
+            return;
+        }
+        
+        const chartData = {
+            labels: data.map(group => group.group_name.substring(0, 20) + (group.group_name.length > 20 ? '...' : '')),
+            datasets: [{
+                label: 'Total Users',
+                data: data.map(group => group.total_users || 0),
+                backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 2
+            }, {
+                label: 'Completed Users',
+                data: data.map(group => group.completed_users || 0),
+                backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 2
+            }, {
+                label: 'Associated Courses',
+                data: data.map(group => group.associated_courses || 0),
+                backgroundColor: 'rgba(255, 206, 86, 0.5)',
+                borderColor: 'rgba(255, 206, 86, 1)',
+                borderWidth: 2
+            }]
+        };
+        
+        window.groupChart = new Chart(ctx, {
+            type: 'bar',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'LearnDash Group Enrollment Overview'
                     },
                     legend: {
                         position: 'top'
@@ -476,6 +627,12 @@ jQuery(document).ready(function($) {
         showSuccessMessage('Learning filters applied successfully!');
     }
     
+    function applyGroupFilters() {
+        currentFilter = $('#group-filter').val();
+        loadLearnDashStats();
+        showSuccessMessage('Group filters applied successfully!');
+    }
+    
     function exportLearnDashData() {
         const $button = $('#export-learndash-stats');
         $button.prop('disabled', true).text('Exporting...');
@@ -529,6 +686,15 @@ jQuery(document).ready(function($) {
         return 'progress-poor';
     }
     
+    function getGroupStatusClass(status) {
+        switch (status.toLowerCase()) {
+            case 'active': return 'status-active';
+            case 'empty': return 'status-empty';
+            case 'no courses': return 'status-no-courses';
+            default: return 'status-default';
+        }
+    }
+    
     function getActivityClass(lastActivity) {
         if (lastActivity === 'Never') return 'text-danger';
         
@@ -551,6 +717,10 @@ jQuery(document).ready(function($) {
         } else if (currentTab === 'course-analytics') {
             $('#course-analytics-table tbody').html(`
                 <tr><td colspan="7" class="text-center wbcom-loading">Loading course analytics...</td></tr>
+            `);
+        } else if (currentTab === 'group-reports') {
+            $('#group-analytics-table tbody').html(`
+                <tr><td colspan="8" class="text-center wbcom-loading">Loading group analytics...</td></tr>
             `);
         }
     }
@@ -690,6 +860,19 @@ jQuery(document).ready(function($) {
                     line-height: 1.6;
                 }
                 .text-muted { color: #666; }
+                
+                /* Group status badges */
+                .status-active { background: #46b450; color: white; }
+                .status-empty { background: #dc3232; color: white; }
+                .status-no-courses { background: #ffb900; color: white; }
+                .status-default { background: #666; color: white; }
+                .status-badge {
+                    padding: 2px 8px;
+                    border-radius: 3px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                }
             </style>
         `);
     }
