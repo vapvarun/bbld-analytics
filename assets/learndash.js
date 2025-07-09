@@ -1,0 +1,586 @@
+/**
+ * LearnDash Reports JavaScript
+ * 
+ * @package Wbcom_Reports
+ */
+
+jQuery(document).ready(function($) {
+    'use strict';
+    
+    // State management
+    let currentTab = 'user-progress';
+    let currentFilter = 'all';
+    let currentCourseFilter = 'all';
+    let completionChart = null;
+    let trendsChart = null;
+    
+    // Initialize LearnDash reports
+    initLearnDashReports();
+    
+    function initLearnDashReports() {
+        loadLearnDashStats();
+        bindEvents();
+        initTabs();
+    }
+    
+    function bindEvents() {
+        // Refresh stats button
+        $('#refresh-learndash-stats').on('click', function() {
+            $(this).prop('disabled', true).text('Refreshing...');
+            loadLearnDashStats();
+        });
+        
+        // Export CSV button
+        $('#export-learndash-stats').on('click', function() {
+            exportLearnDashData();
+        });
+        
+        // Tab switching
+        $('.tab-button').on('click', function() {
+            const tabId = $(this).data('tab');
+            switchTab(tabId);
+        });
+        
+        // Apply learning filters
+        $('#apply-learning-filters').on('click', function() {
+            applyLearningFilters();
+        });
+        
+        // Filter change events
+        $('#progress-filter').on('change', function() {
+            currentFilter = $(this).val();
+        });
+        
+        $('#course-filter').on('change', function() {
+            currentCourseFilter = $(this).val();
+        });
+    }
+    
+    function initTabs() {
+        // Set initial active tab
+        switchTab('user-progress');
+    }
+    
+    function switchTab(tabId) {
+        // Update tab buttons
+        $('.tab-button').removeClass('active');
+        $(`.tab-button[data-tab="${tabId}"]`).addClass('active');
+        
+        // Update tab content
+        $('.tab-content').removeClass('active');
+        $(`#${tabId}`).addClass('active');
+        
+        // Update current tab
+        currentTab = tabId;
+        
+        // Load data for the new tab
+        loadLearnDashStats();
+    }
+    
+    function loadLearnDashStats() {
+        showLoadingState();
+        
+        $.ajax({
+            url: wbcomReports.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'get_learndash_stats',
+                nonce: wbcomReports.nonce,
+                tab: currentTab,
+                filter: currentFilter,
+                course_id: currentCourseFilter
+            },
+            success: function(response) {
+                if (response.success) {
+                    updateLearnDashDisplay(response.data);
+                } else {
+                    // Handle LearnDash not active error gracefully
+                    if (response.data && response.data.includes('LearnDash not active')) {
+                        showLearnDashNotActiveMessage();
+                    } else {
+                        showErrorMessage('Failed to load LearnDash stats: ' + (response.data || 'Unknown error'));
+                    }
+                }
+            },
+            error: function(xhr, status, error) {
+                showErrorMessage('Error loading LearnDash stats: ' + error);
+            },
+            complete: function() {
+                hideLoadingState();
+            }
+        });
+    }
+    
+    function updateLearnDashDisplay(data) {
+        // Update stat boxes with null safety
+        updateStatBox('#total-courses', data.total_courses || 0);
+        updateStatBox('#total-lessons', data.total_lessons || 0);
+        updateStatBox('#active-learners', data.active_learners || 0);
+        updateStatBox('#completed-courses', data.completed_courses || 0);
+        
+        // Update course filter dropdown
+        updateCourseFilter(data.courses_list || []);
+        
+        // Update content based on active tab
+        switch (currentTab) {
+            case 'user-progress':
+                updateUserProgressTable(data.user_stats || []);
+                break;
+            case 'course-analytics':
+                updateCourseAnalytics(data.course_analytics || []);
+                break;
+            case 'completion-rates':
+                updateCompletionTrends(data.completion_trends || []);
+                break;
+        }
+    }
+    
+    function updateCourseFilter(coursesList) {
+        const $courseFilter = $('#course-filter');
+        const currentValue = $courseFilter.val();
+        
+        $courseFilter.empty().append('<option value="all">All Courses</option>');
+        
+        if (coursesList && coursesList.length > 0) {
+            coursesList.forEach(function(course) {
+                $courseFilter.append(`<option value="${course.id}">${escapeHtml(course.title)}</option>`);
+            });
+        }
+        
+        // Restore previous selection if it still exists
+        if (currentValue && $courseFilter.find(`option[value="${currentValue}"]`).length) {
+            $courseFilter.val(currentValue);
+        }
+    }
+    
+    function updateUserProgressTable(userStats) {
+        const $tableBody = $('#user-learning-stats-table tbody');
+        $tableBody.empty();
+        
+        if (userStats && userStats.length > 0) {
+            userStats.forEach(function(user, index) {
+                const progressClass = getProgressClass(user.avg_progress);
+                const progressDetail = formatCourseProgress(user.course_progress);
+                
+                const row = `
+                    <tr class="fade-in" style="animation-delay: ${index * 0.1}s">
+                        <td>
+                            <strong>${escapeHtml(user.display_name)}</strong>
+                            <br><small class="text-muted">${escapeHtml(user.user_login)}</small>
+                        </td>
+                        <td><code>${escapeHtml(user.user_login)}</code></td>
+                        <td>
+                            <span class="course-count font-bold">
+                                ${formatNumber(user.enrolled_courses)}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="completion-count text-success font-bold">
+                                ${formatNumber(user.completed_courses)}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="progress-count text-warning">
+                                ${formatNumber(user.in_progress)}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="course-progress-container">
+                                <div class="avg-progress">
+                                    <span class="progress-percentage ${progressClass}">
+                                        Avg: ${user.avg_progress}
+                                    </span>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill ${progressClass}" 
+                                             style="width: ${user.avg_progress}">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="course-details">
+                                    ${progressDetail}
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <small class="${getActivityClass(user.last_activity)}">
+                                ${formatDate(user.last_activity)}
+                            </small>
+                        </td>
+                        <td>
+                            <span class="time-spent text-primary">
+                                ${user.total_time_spent}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+                $tableBody.append(row);
+            });
+            
+        } else {
+            $tableBody.append(`
+                <tr>
+                    <td colspan="8" class="text-center">
+                        <div class="no-data-message">
+                            <p><em>No learning data found with the current filters.</em></p>
+                            <p><small>Try adjusting your filter criteria.</small></p>
+                        </div>
+                    </td>
+                </tr>
+            `);
+        }
+    }
+    
+    function updateCourseAnalytics(courseAnalytics) {
+        // Update course analytics table
+        const $tableBody = $('#course-analytics-table tbody');
+        $tableBody.empty();
+        
+        if (courseAnalytics && courseAnalytics.length > 0) {
+            courseAnalytics.forEach(function(course, index) {
+                const row = `
+                    <tr class="fade-in" style="animation-delay: ${index * 0.1}s">
+                        <td>
+                            <strong>${escapeHtml(course.course_name)}</strong>
+                        </td>
+                        <td>${formatNumber(course.enrolled_users)}</td>
+                        <td>
+                            <span class="text-success font-bold">
+                                ${formatNumber(course.completed)}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="text-warning">
+                                ${formatNumber(course.in_progress)}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="${getProgressClass(course.completion_rate)}">
+                                ${course.completion_rate}
+                            </span>
+                        </td>
+                        <td>${course.avg_completion_time}</td>
+                        <td>
+                            <span class="rating text-warning">
+                                ${course.rating}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+                $tableBody.append(row);
+            });
+            
+            // Create course completion chart
+            createCourseCompletionChart(courseAnalytics);
+            
+        } else {
+            $tableBody.append(`
+                <tr>
+                    <td colspan="7" class="text-center">
+                        <div class="no-data-message">
+                            <p><em>No course analytics data available.</em></p>
+                            <p><small>Make sure LearnDash is properly configured and users have enrolled in courses.</small></p>
+                        </div>
+                    </td>
+                </tr>
+            `);
+        }
+    }
+    
+    function updateCompletionTrends(completionTrends) {
+        if (completionTrends && completionTrends.length > 0) {
+            createCompletionTrendsChart(completionTrends);
+        } else {
+            $('#completion-trends-chart').closest('.wbcom-chart-container').html(`
+                <div class="text-center no-data-message" style="padding: 100px;">
+                    <h3>No Completion Trends Available</h3>
+                    <p><em>No course completion data found.</em></p>
+                    <p><small>Data will appear here once users start completing courses.</small></p>
+                </div>
+            `);
+        }
+    }
+    
+    function createCourseCompletionChart(data) {
+        const ctx = document.getElementById('course-completion-chart');
+        if (!ctx) return;
+        
+        // Destroy existing chart
+        if (completionChart) {
+            completionChart.destroy();
+        }
+        
+        // Handle empty data
+        if (!data || data.length === 0) {
+            $(ctx).closest('.wbcom-chart-container').html(`
+                <div class="text-center no-data-message" style="padding: 100px;">
+                    <h3>No Course Data Available</h3>
+                    <p>Create courses and enroll users to see analytics here.</p>
+                </div>
+            `);
+            return;
+        }
+        
+        const chartData = {
+            labels: data.map(course => course.course_name.substring(0, 20) + '...'),
+            datasets: [{
+                label: 'Enrolled',
+                data: data.map(course => course.enrolled_users || 0),
+                backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 2
+            }, {
+                label: 'Completed',
+                data: data.map(course => course.completed || 0),
+                backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 2
+            }]
+        };
+        
+        completionChart = new Chart(ctx, {
+            type: 'bar',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Course Enrollment vs Completion'
+                    },
+                    legend: {
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+    
+    function createCompletionTrendsChart(data) {
+        const ctx = document.getElementById('completion-trends-chart');
+        if (!ctx) return;
+        
+        // Destroy existing chart
+        if (trendsChart) {
+            trendsChart.destroy();
+        }
+        
+        // Handle empty data
+        if (!data || data.length === 0) {
+            $(ctx).closest('.wbcom-chart-container').html(`
+                <div class="text-center no-data-message" style="padding: 100px;">
+                    <h3>No Completion Trends Available</h3>
+                    <p>Course completion data will appear here over time.</p>
+                </div>
+            `);
+            return;
+        }
+        
+        const chartData = {
+            labels: data.map(item => item.month),
+            datasets: [{
+                label: 'Course Completions',
+                data: data.map(item => item.completions || 0),
+                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                borderColor: 'rgba(255, 99, 132, 1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4
+            }]
+        };
+        
+        trendsChart = new Chart(ctx, {
+            type: 'line',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Monthly Course Completion Trends'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+    
+    function applyLearningFilters() {
+        currentFilter = $('#progress-filter').val();
+        currentCourseFilter = $('#course-filter').val();
+        
+        loadLearnDashStats();
+        showSuccessMessage('Learning filters applied successfully!');
+    }
+    
+    function exportLearnDashData() {
+        const $button = $('#export-learndash-stats');
+        $button.prop('disabled', true).text('Exporting...');
+        
+        // Create download form
+        const form = $('<form>', {
+            method: 'POST',
+            action: wbcomReports.ajaxurl
+        });
+        
+        form.append($('<input>', { type: 'hidden', name: 'action', value: 'export_learndash_stats' }));
+        form.append($('<input>', { type: 'hidden', name: 'nonce', value: wbcomReports.nonce }));
+        form.append($('<input>', { type: 'hidden', name: 'tab', value: currentTab }));
+        form.append($('<input>', { type: 'hidden', name: 'filter', value: currentFilter }));
+        form.append($('<input>', { type: 'hidden', name: 'course_id', value: currentCourseFilter }));
+        
+        $('body').append(form);
+        form.submit();
+        form.remove();
+        
+        setTimeout(function() {
+            $button.prop('disabled', false).text('Export CSV');
+        }, 2000);
+        
+        showSuccessMessage('Export started! Your download should begin shortly.');
+    }
+    
+    function getProgressClass(progressRate) {
+        const rate = parseFloat(progressRate);
+        if (rate >= 80) return 'progress-excellent';
+        if (rate >= 60) return 'progress-good';
+        if (rate >= 40) return 'progress-average';
+        return 'progress-poor';
+    }
+    
+    function getActivityClass(lastActivity) {
+        if (lastActivity === 'Never') return 'text-danger';
+        
+        const activityDate = new Date(lastActivity);
+        const now = new Date();
+        const daysDiff = (now - activityDate) / (1000 * 60 * 60 * 24);
+        
+        if (daysDiff <= 7) return 'text-success';
+        if (daysDiff <= 30) return 'text-warning';
+        return 'text-danger';
+    }
+    
+    function showLoadingState() {
+        $('.stat-number').text('Loading...');
+        
+        if (currentTab === 'user-progress') {
+            $('#user-learning-stats-table tbody').html(`
+                <tr><td colspan="7" class="text-center wbcom-loading">Loading learning progress...</td></tr>
+            `);
+        } else if (currentTab === 'course-analytics') {
+            $('#course-analytics-table tbody').html(`
+                <tr><td colspan="7" class="text-center wbcom-loading">Loading course analytics...</td></tr>
+            `);
+        }
+    }
+    
+    function hideLoadingState() {
+        $('#refresh-learndash-stats').prop('disabled', false).text('Refresh Stats');
+    }
+    
+    function updateStatBox(selector, value) {
+        const $element = $(selector);
+        $element.fadeOut(200, function() {
+            $element.text(formatNumber(value)).fadeIn(200);
+        });
+    }
+    
+    function showErrorMessage(message) {
+        showMessage(message, 'error');
+    }
+    
+    function showSuccessMessage(message) {
+        showMessage(message, 'success');
+    }
+    
+    function showMessage(message, type) {
+        const $container = $('.wbcom-stats-container');
+        const messageHtml = `
+            <div class="notice notice-${type} is-dismissible fade-in">
+                <p>${escapeHtml(message)}</p>
+                <button type="button" class="notice-dismiss">
+                    <span class="screen-reader-text">Dismiss this notice.</span>
+                </button>
+            </div>
+        `;
+        
+        $container.prepend(messageHtml);
+        
+        setTimeout(function() {
+            $(`.notice-${type}`).fadeOut();
+        }, 5000);
+    }
+    
+    // Utility functions
+    function formatNumber(num) {
+        if (num === null || num === undefined) return '0';
+        return parseInt(num).toLocaleString();
+    }
+    
+    function formatDate(dateString) {
+        if (!dateString || dateString === 'Never') return 'Never';
+        
+        try {
+            const date = new Date(dateString);
+            return date.toLocaleDateString();
+        } catch (e) {
+            return dateString;
+        }
+    }
+    
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    // Handle notice dismissal
+    $(document).on('click', '.notice-dismiss', function() {
+        $(this).closest('.notice').fadeOut();
+    });
+    
+    // Add dynamic styles for LearnDash
+    if (!$('#learndash-dynamic-styles').length) {
+        $('head').append(`
+            <style id="learndash-dynamic-styles">
+                .progress-container {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }
+                .progress-bar {
+                    flex: 1;
+                    height: 8px;
+                    background: #f0f0f0;
+                    border-radius: 4px;
+                    overflow: hidden;
+                }
+                .progress-fill {
+                    height: 100%;
+                    transition: width 0.3s ease;
+                }
+                .progress-excellent { color: #46b450; }
+                .progress-excellent.progress-fill { background: #46b450; }
+                .progress-good { color: #00a32a; }
+                .progress-good.progress-fill { background: #00a32a; }
+                .progress-average { color: #ffb900; }
+                .progress-average.progress-fill { background: #ffb900; }
+                .progress-poor { color: #dc3232; }
+                .progress-poor.progress-fill { background: #dc3232; }
+                .course-count, .completion-count { font-size: 16px; }
+                .rating { font-weight: bold; }
+            </style>
+        `);
+    }
+});
