@@ -1,5 +1,5 @@
 /**
- * Enhanced LearnDash Reports JavaScript with Search and Sorting
+ * Enhanced LearnDash Reports JavaScript with Indexing Support
  * 
  * @package Wbcom_Reports
  */
@@ -15,6 +15,7 @@ jQuery(document).ready(function($) {
     let currentSortBy = 'enrolled_courses';
     let currentSortOrder = 'desc';
     let completionChart = null;
+    let isIndexing = false;
     
     // Initialize LearnDash reports
     initLearnDashReports();
@@ -23,6 +24,7 @@ jQuery(document).ready(function($) {
         loadLearnDashStats();
         bindEvents();
         initTabs();
+        checkIndexStatus();
     }
     
     function bindEvents() {
@@ -35,6 +37,11 @@ jQuery(document).ready(function($) {
         // Export CSV button
         $('#export-learndash-stats').on('click', function() {
             exportLearnDashData();
+        });
+        
+        // Rebuild index button
+        $('#rebuild-ld-index').on('click', function() {
+            rebuildLearnDashIndex();
         });
         
         // Tab switching
@@ -106,6 +113,137 @@ jQuery(document).ready(function($) {
         });
     }
     
+    function checkIndexStatus() {
+        // Check if index needs rebuilding based on UI indicators
+        const $rebuildButton = $('#rebuild-ld-index');
+        if ($rebuildButton.hasClass('needs-rebuild')) {
+            showIndexWarning();
+        }
+    }
+    
+    function showIndexWarning() {
+        const warningHtml = `
+            <div class="notice notice-warning is-dismissible index-warning">
+                <p>
+                    <strong>Learning Performance Notice:</strong> 
+                    The learning index needs rebuilding for optimal performance. 
+                    <a href="#" id="rebuild-ld-index-link">Rebuild now</a> to improve loading times.
+                </p>
+            </div>
+        `;
+        
+        $('.wbcom-stats-container').prepend(warningHtml);
+        
+        $('#rebuild-ld-index-link').on('click', function(e) {
+            e.preventDefault();
+            rebuildLearnDashIndex();
+        });
+    }
+    
+    function rebuildLearnDashIndex() {
+        if (isIndexing) {
+            return;
+        }
+        
+        const $button = $('#rebuild-ld-index');
+        const originalText = $button.text();
+        
+        isIndexing = true;
+        $button.prop('disabled', true).text('Rebuilding Learning Index...');
+        
+        // Show progress indicator
+        showIndexProgress();
+        
+        $.ajax({
+            url: wbcomReports.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'rebuild_ld_index',
+                nonce: wbcomReports.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    showSuccessMessage(response.data.message);
+                    
+                    // Update index status display
+                    updateIndexStatus(response.data.indexed_count);
+                    
+                    // Remove warning if present
+                    $('.index-warning').fadeOut();
+                    
+                    // Change button styling back to normal
+                    $button.removeClass('needs-rebuild');
+                    
+                    // Refresh the data to show improved performance
+                    setTimeout(() => {
+                        loadLearnDashStats();
+                    }, 1000);
+                    
+                } else {
+                    showErrorMessage('Failed to rebuild learning index: ' + (response.data || 'Unknown error'));
+                }
+            },
+            error: function(xhr, status, error) {
+                showErrorMessage('Error rebuilding learning index: ' + error);
+            },
+            complete: function() {
+                isIndexing = false;
+                $button.prop('disabled', false).text(originalText);
+                hideIndexProgress();
+            }
+        });
+    }
+    
+    function showIndexProgress() {
+        const progressHtml = `
+            <div id="ld-index-progress" class="wbcom-index-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill"></div>
+                </div>
+                <p>Rebuilding learning index... This may take a few moments for large sites with many learners.</p>
+            </div>
+        `;
+        
+        $('.wbcom-stats-actions').after(progressHtml);
+        
+        // Animate progress bar
+        let progress = 0;
+        const interval = setInterval(() => {
+            progress += Math.random() * 10;
+            if (progress > 90) progress = 90;
+            
+            $('#ld-index-progress .progress-fill').css('width', progress + '%');
+        }, 500);
+        
+        // Store interval for cleanup
+        $('#ld-index-progress').data('interval', interval);
+    }
+    
+    function hideIndexProgress() {
+        const $progress = $('#ld-index-progress');
+        const interval = $progress.data('interval');
+        
+        if (interval) {
+            clearInterval(interval);
+        }
+        
+        // Complete the progress bar
+        $progress.find('.progress-fill').css('width', '100%');
+        
+        setTimeout(() => {
+            $progress.fadeOut(() => {
+                $progress.remove();
+            });
+        }, 500);
+    }
+    
+    function updateIndexStatus(indexedCount) {
+        $('.index-details p').first().html(function(i, html) {
+            return html.replace(/\d+ of \d+ users indexed/, 
+                indexedCount + ' of ' + indexedCount + ' users indexed (100% coverage)');
+        });
+    }
+    
     function initTabs() {
         // Set initial active tab
         switchTab('user-progress');
@@ -171,6 +309,11 @@ jQuery(document).ready(function($) {
             success: function(response) {
                 if (response.success) {
                     updateLearnDashDisplay(response.data);
+                    
+                    // Show performance indicator if using indexed data
+                    if (response.data.using_index) {
+                        showPerformanceIndicator();
+                    }
                 } else {
                     // Handle LearnDash not active error gracefully
                     if (response.data && response.data.includes('LearnDash not active')) {
@@ -187,6 +330,23 @@ jQuery(document).ready(function($) {
                 hideLoadingState();
             }
         });
+    }
+    
+    function showPerformanceIndicator() {
+        if (!$('.performance-indicator').length) {
+            const indicatorHtml = `
+                <div class="performance-indicator">
+                    <span class="dashicons dashicons-performance"></span>
+                    <small>Using indexed data for fast performance</small>
+                </div>
+            `;
+            $('.wbcom-stats-actions').append(indicatorHtml);
+            
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                $('.performance-indicator').fadeOut();
+            }, 3000);
+        }
     }
     
     function updateLearnDashDisplay(data) {
@@ -239,7 +399,6 @@ jQuery(document).ready(function($) {
         if (userStats && userStats.length > 0) {
             userStats.forEach(function(user, index) {
                 const progressClass = getProgressClass(user.avg_progress);
-                const progressDetail = formatCourseProgress(user.course_progress);
                 const editUrl = wbcomReports.adminUrl + 'user-edit.php?user_id=' + user.user_id;
                 
                 const row = `
@@ -270,19 +429,14 @@ jQuery(document).ready(function($) {
                             </span>
                         </td>
                         <td>
-                            <div class="course-progress-container">
-                                <div class="avg-progress">
-                                    <span class="progress-percentage ${progressClass}">
-                                        Avg: ${user.avg_progress}
-                                    </span>
-                                    <div class="progress-bar">
-                                        <div class="progress-fill ${progressClass}" 
-                                             style="width: ${user.avg_progress}">
-                                        </div>
+                            <div class="avg-progress">
+                                <span class="progress-percentage ${progressClass}">
+                                    ${user.avg_progress}
+                                </span>
+                                <div class="progress-bar">
+                                    <div class="progress-fill ${progressClass}" 
+                                         style="width: ${user.avg_progress}">
                                     </div>
-                                </div>
-                                <div class="course-details">
-                                    ${progressDetail}
                                 </div>
                             </div>
                         </td>
@@ -330,37 +484,6 @@ jQuery(document).ready(function($) {
         } else {
             $searchInfo.hide();
         }
-    }
-    
-    function formatCourseProgress(courseProgress) {
-        if (!courseProgress || !Array.isArray(courseProgress) || courseProgress.length === 0) {
-            return '<small class="text-muted">No progress data</small>';
-        }
-        
-        let progressHtml = '<div class="course-progress-list">';
-        
-        // Show first 3 courses, then summarize if more
-        const showCount = Math.min(3, courseProgress.length);
-        
-        for (let i = 0; i < showCount; i++) {
-            const course = courseProgress[i];
-            const progressClass = getProgressClass(course.progress + '%');
-            
-            progressHtml += `
-                <div class="course-progress-item">
-                    <small class="course-name">${escapeHtml(course.course_title)}</small>
-                    <span class="progress-badge ${progressClass}">${course.progress}%</span>
-                </div>
-            `;
-        }
-        
-        if (courseProgress.length > 3) {
-            progressHtml += `<small class="text-muted">+${courseProgress.length - 3} more courses</small>`;
-        }
-        
-        progressHtml += '</div>';
-        
-        return progressHtml;
     }
     
     function updateCourseAnalytics(courseAnalytics) {
@@ -816,11 +939,8 @@ jQuery(document).ready(function($) {
     if (!$('#learndash-dynamic-styles').length) {
         $('head').append(`
             <style id="learndash-dynamic-styles">
-                .course-progress-container {
-                    max-width: 250px;
-                }
                 .avg-progress {
-                    margin-bottom: 8px;
+                    max-width: 150px;
                 }
                 .progress-bar {
                     width: 100%;
@@ -843,36 +963,6 @@ jQuery(document).ready(function($) {
                 .progress-poor { color: #dc3232; }
                 .progress-poor.progress-fill { background: #dc3232; }
                 
-                .course-progress-list {
-                    max-height: 120px;
-                    overflow-y: auto;
-                }
-                .course-progress-item {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 4px;
-                    padding: 2px 0;
-                    border-bottom: 1px solid #f0f0f0;
-                }
-                .course-progress-item:last-child {
-                    border-bottom: none;
-                }
-                .course-name {
-                    flex: 1;
-                    margin-right: 8px;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
-                }
-                .progress-badge {
-                    font-weight: bold;
-                    font-size: 11px;
-                    padding: 2px 6px;
-                    border-radius: 3px;
-                    background: #f0f0f0;
-                }
-                
                 .course-count, .completion-count { font-size: 16px; }
                 .no-data-message {
                     padding: 40px 20px;
@@ -892,6 +982,76 @@ jQuery(document).ready(function($) {
                     font-size: 11px;
                     font-weight: 600;
                     text-transform: uppercase;
+                }
+                
+                /* Index Status Styles */
+                .wbcom-index-status {
+                    background: #f8f9fa;
+                    border: 1px solid #e1e1e1;
+                    border-radius: 4px;
+                    padding: 15px;
+                    margin-bottom: 20px;
+                }
+                .index-details p {
+                    margin: 5px 0;
+                }
+                .cache-enabled {
+                    color: #46b450;
+                    font-weight: bold;
+                }
+                .cache-disabled {
+                    color: #ffb900;
+                    font-weight: bold;
+                }
+                .needs-rebuild {
+                    background-color: #ff6b6b !important;
+                    color: white !important;
+                }
+                .needs-rebuild:hover {
+                    background-color: #ff5252 !important;
+                }
+                
+                /* Progress Bar Styles */
+                .wbcom-index-progress {
+                    background: #fff;
+                    border: 1px solid #0073aa;
+                    border-radius: 4px;
+                    padding: 15px;
+                    margin: 15px 0;
+                    text-align: center;
+                }
+                .wbcom-index-progress .progress-bar {
+                    width: 100%;
+                    height: 20px;
+                    background: #f0f0f0;
+                    border-radius: 10px;
+                    overflow: hidden;
+                    margin-bottom: 10px;
+                }
+                .wbcom-index-progress .progress-fill {
+                    height: 100%;
+                    background: linear-gradient(90deg, #0073aa, #00a0d2);
+                    width: 0%;
+                    transition: width 0.3s ease;
+                    border-radius: 10px;
+                }
+                
+                /* Performance Indicator */
+                .performance-indicator {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 5px;
+                    background: #d4edda;
+                    color: #155724;
+                    padding: 5px 10px;
+                    border-radius: 3px;
+                    font-size: 12px;
+                    margin-left: 10px;
+                }
+                .performance-indicator .dashicons {
+                    font-size: 14px;
+                    width: 14px;
+                    height: 14px;
                 }
                 
                 /* Search and Sort Styles */

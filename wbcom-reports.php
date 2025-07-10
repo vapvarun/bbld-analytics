@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Wbcom Activity & Learning Reports
- * Description: Comprehensive reporting widget for BuddyPress activity and LearnDash learning metrics
- * Version: 1.0
+ * Description: Comprehensive reporting widget for BuddyPress activity and LearnDash learning metrics with search and sorting capabilities
+ * Version: 1.1
  * Author: vapvarun
  * Author URI: https://wbcomdesigns.com
  * Company: Wbcom Designs
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 // Define plugin constants
 define('WBCOM_REPORTS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WBCOM_REPORTS_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('WBCOM_REPORTS_VERSION', '1.0');
+define('WBCOM_REPORTS_VERSION', '1.1');
 
 class Wbcom_Reports_Main {
     
@@ -51,6 +51,7 @@ class Wbcom_Reports_Main {
     private function include_files() {
         // Include helpers first since other classes depend on it
         require_once WBCOM_REPORTS_PLUGIN_DIR . 'includes/class-helpers.php';
+        require_once WBCOM_REPORTS_PLUGIN_DIR . 'includes/class-reports-index.php';
         require_once WBCOM_REPORTS_PLUGIN_DIR . 'includes/class-dashboard.php';
         require_once WBCOM_REPORTS_PLUGIN_DIR . 'includes/class-buddypress-reports.php';
         require_once WBCOM_REPORTS_PLUGIN_DIR . 'includes/class-learndash-reports.php';
@@ -117,14 +118,17 @@ class Wbcom_Reports_Main {
         if ($hook === 'toplevel_page_wbcom-reports') {
             wp_enqueue_script('wbcom-dashboard', WBCOM_REPORTS_PLUGIN_URL . 'assets/dashboard.js', array('jquery'), WBCOM_REPORTS_VERSION, true);
         } elseif ($hook === 'wbcom-reports_page_wbcom-buddypress-reports') {
-            wp_enqueue_script('wbcom-buddypress', WBCOM_REPORTS_PLUGIN_URL . 'assets/buddypress.js', array('jquery'), WBCOM_REPORTS_VERSION, true);
+            // Use the new indexed version for BuddyPress reports
+            wp_enqueue_script('wbcom-buddypress-indexed', WBCOM_REPORTS_PLUGIN_URL . 'assets/buddypress-indexed.js', array('jquery'), WBCOM_REPORTS_VERSION, true);
         } elseif ($hook === 'wbcom-reports_page_wbcom-learndash-reports') {
-            wp_enqueue_script('wbcom-learndash', WBCOM_REPORTS_PLUGIN_URL . 'assets/learndash.js', array('jquery'), WBCOM_REPORTS_VERSION, true);
+            // Use the enhanced indexed version for LearnDash reports too
+            wp_enqueue_script('wbcom-learndash-indexed', WBCOM_REPORTS_PLUGIN_URL . 'assets/learndash-indexed.js', array('jquery'), WBCOM_REPORTS_VERSION, true);
         }
         
-        // Localize script
+        // Localize script with admin URL support
         wp_localize_script('jquery', 'wbcomReports', array(
             'ajaxurl' => admin_url('admin-ajax.php'),
+            'adminUrl' => admin_url(),
             'nonce' => wp_create_nonce('wbcom_reports_nonce')
         ));
     }

@@ -1,5 +1,5 @@
 /**
- * Enhanced BuddyPress Reports JavaScript with Search and Sorting
+ * Enhanced Reports JavaScript with Indexing Support - Complete Version
  * 
  * @package Wbcom_Reports
  */
@@ -15,6 +15,7 @@ jQuery(document).ready(function($) {
     let currentSearch = '';
     let currentSortBy = 'activity_count';
     let currentSortOrder = 'desc';
+    let isIndexing = false;
     
     // Initialize BuddyPress reports
     initBuddyPressReports();
@@ -23,6 +24,7 @@ jQuery(document).ready(function($) {
         loadBuddyPressStats();
         bindEvents();
         initFilters();
+        checkIndexStatus();
     }
     
     function bindEvents() {
@@ -40,6 +42,11 @@ jQuery(document).ready(function($) {
         // Apply filters button
         $('#apply-filters').on('click', function() {
             applyFilters();
+        });
+        
+        // Rebuild index button
+        $('#rebuild-bp-index').on('click', function() {
+            rebuildIndex();
         });
         
         // Search functionality
@@ -62,18 +69,13 @@ jQuery(document).ready(function($) {
             const sortBy = $(this).data('sort');
             
             if (currentSortBy === sortBy) {
-                // Toggle sort order
                 currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
             } else {
-                // New sort column
                 currentSortBy = sortBy;
                 currentSortOrder = 'desc';
             }
             
-            // Update UI indicators
             updateSortIndicators();
-            
-            // Reload data
             currentPage = 1;
             loadBuddyPressStats();
         });
@@ -106,6 +108,195 @@ jQuery(document).ready(function($) {
         });
     }
     
+    function checkIndexStatus() {
+        // Check if index needs rebuilding based on UI indicators
+        const $rebuildButton = $('#rebuild-bp-index');
+        if ($rebuildButton.css('background-color') === 'rgb(255, 107, 107)') {
+            showIndexWarning();
+        }
+    }
+    
+    function showIndexWarning() {
+        const warningHtml = `
+            <div class="notice notice-warning is-dismissible index-warning">
+                <p>
+                    <strong>Performance Notice:</strong> 
+                    The user index needs rebuilding for optimal performance. 
+                    <a href="#" id="rebuild-index-link">Rebuild now</a> to improve loading times.
+                </p>
+            </div>
+        `;
+        
+        $('.wbcom-stats-container').prepend(warningHtml);
+        
+        $('#rebuild-index-link').on('click', function(e) {
+            e.preventDefault();
+            rebuildIndex();
+        });
+    }
+    
+    function rebuildIndex() {
+        if (isIndexing) {
+            return;
+        }
+        
+        const $button = $('#rebuild-bp-index');
+        const originalText = $button.text();
+        
+        isIndexing = true;
+        $button.prop('disabled', true).text('Rebuilding Index...');
+        
+        // Show progress indicator
+        showIndexProgress();
+        
+        $.ajax({
+            url: wbcomReports.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'rebuild_bp_index',
+                nonce: wbcomReports.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    showSuccessMessage(response.data.message);
+                    
+                    // Update index status display
+                    updateIndexStatus(response.data.indexed_count);
+                    
+                    // Remove warning if present
+                    $('.index-warning').fadeOut();
+                    
+                    // Change button color back to normal
+                    $button.css({
+                        'background-color': '',
+                        'color': ''
+                    });
+                    
+                    // Refresh the data to show improved performance
+                    setTimeout(() => {
+                        loadBuddyPressStats();
+                    }, 1000);
+                    
+                } else {
+                    showErrorMessage('Failed to rebuild index: ' + (response.data || 'Unknown error'));
+                }
+            },
+            error: function(xhr, status, error) {
+                showErrorMessage('Error rebuilding index: ' + error);
+            },
+            complete: function() {
+                isIndexing = false;
+                $button.prop('disabled', false).text(originalText);
+                hideIndexProgress();
+            }
+        });
+    }
+    
+    function showIndexProgress() {
+        const progressHtml = `
+            <div id="index-progress" class="wbcom-index-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill"></div>
+                </div>
+                <p>Rebuilding user index... This may take a few moments for large sites.</p>
+            </div>
+        `;
+        
+        $('.wbcom-stats-actions').after(progressHtml);
+        
+        // Animate progress bar
+        let progress = 0;
+        const interval = setInterval(() => {
+            progress += Math.random() * 10;
+            if (progress > 90) progress = 90;
+            
+            $('#index-progress .progress-fill').css('width', progress + '%');
+        }, 500);
+        
+        // Store interval for cleanup
+        $('#index-progress').data('interval', interval);
+    }
+    
+    function hideIndexProgress() {
+        const $progress = $('#index-progress');
+        const interval = $progress.data('interval');
+        
+        if (interval) {
+            clearInterval(interval);
+        }
+        
+        // Complete the progress bar
+        $progress.find('.progress-fill').css('width', '100%');
+        
+        setTimeout(() => {
+            $progress.fadeOut(() => {
+                $progress.remove();
+            });
+        }, 500);
+    }
+    
+    function updateIndexStatus(indexedCount) {
+        $('.index-info p').html(function(i, html) {
+            return html.replace(/\d+ of \d+ users indexed/, 
+                indexedCount + ' of ' + indexedCount + ' users indexed (100% coverage)');
+        });
+    }
+    
+    function loadBuddyPressStats() {
+        showLoadingState();
+        
+        $.ajax({
+            url: wbcomReports.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'get_buddypress_stats',
+                nonce: wbcomReports.nonce,
+                page: currentPage,
+                filter: currentFilter,
+                date_from: currentDateFrom,
+                date_to: currentDateTo,
+                search: currentSearch,
+                sort_by: currentSortBy,
+                sort_order: currentSortOrder
+            },
+            success: function(response) {
+                if (response.success) {
+                    updateBuddyPressDisplay(response.data);
+                    
+                    // Show performance indicator if using indexed data
+                    if (response.data.using_index) {
+                        showPerformanceIndicator();
+                    }
+                } else {
+                    showErrorMessage('Failed to load BuddyPress stats: ' + response.data);
+                }
+            },
+            error: function(xhr, status, error) {
+                showErrorMessage('Error loading BuddyPress stats: ' + error);
+            },
+            complete: function() {
+                hideLoadingState();
+            }
+        });
+    }
+    
+    function showPerformanceIndicator() {
+        if (!$('.performance-indicator').length) {
+            const indicatorHtml = `
+                <div class="performance-indicator">
+                    <span class="dashicons dashicons-performance"></span>
+                    <small>Using indexed data for fast performance</small>
+                </div>
+            `;
+            $('.wbcom-stats-actions').append(indicatorHtml);
+            
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                $('.performance-indicator').fadeOut();
+            }, 3000);
+        }
+    }
+    
     function initFilters() {
         // Set default date range (last 30 days)
         const today = new Date();
@@ -130,39 +321,6 @@ jQuery(document).ready(function($) {
         // Update header classes
         $('.sortable-header').removeClass('sorted-asc sorted-desc');
         $currentHeader.addClass(`sorted-${currentSortOrder}`);
-    }
-    
-    function loadBuddyPressStats() {
-        showLoadingState();
-        
-        $.ajax({
-            url: wbcomReports.ajaxurl,
-            type: 'POST',
-            data: {
-                action: 'get_buddypress_stats',
-                nonce: wbcomReports.nonce,
-                page: currentPage,
-                filter: currentFilter,
-                date_from: currentDateFrom,
-                date_to: currentDateTo,
-                search: currentSearch,
-                sort_by: currentSortBy,
-                sort_order: currentSortOrder
-            },
-            success: function(response) {
-                if (response.success) {
-                    updateBuddyPressDisplay(response.data);
-                } else {
-                    showErrorMessage('Failed to load BuddyPress stats: ' + response.data);
-                }
-            },
-            error: function(xhr, status, error) {
-                showErrorMessage('Error loading BuddyPress stats: ' + error);
-            },
-            complete: function() {
-                hideLoadingState();
-            }
-        });
     }
     
     function updateBuddyPressDisplay(data) {
@@ -290,8 +448,6 @@ jQuery(document).ready(function($) {
         currentPage = 1;
         
         loadBuddyPressStats();
-        
-        // Show filter applied message
         showSuccessMessage('Filters applied successfully!');
     }
     
@@ -326,34 +482,8 @@ jQuery(document).ready(function($) {
         showSuccessMessage('Export started! Your download should begin shortly.');
     }
     
-    function addTableHoverEffects() {
-        $('#user-activity-stats-table tbody tr').hover(
-            function() {
-                $(this).addClass('table-row-hover');
-            },
-            function() {
-                $(this).removeClass('table-row-hover');
-            }
-        );
-    }
-    
-    function getLastLoginClass(lastLogin) {
-        if (lastLogin === 'Never') return 'text-danger';
-        
-        const loginDate = new Date(lastLogin);
-        const now = new Date();
-        const daysDiff = (now - loginDate) / (1000 * 60 * 60 * 24);
-        
-        if (daysDiff <= 7) return 'text-success';
-        if (daysDiff <= 30) return 'text-warning';
-        return 'text-danger';
-    }
-    
     function showLoadingState() {
-        // Show loading in stat boxes
         $('.stat-number').text('Loading...');
-        
-        // Show loading in table
         $('#user-activity-stats-table tbody').html(`
             <tr>
                 <td colspan="6" class="text-center wbcom-loading">
@@ -361,8 +491,6 @@ jQuery(document).ready(function($) {
                 </td>
             </tr>
         `);
-        
-        // Hide pagination during loading
         $('.wbcom-pagination').hide();
         $('#search-info').hide();
     }
@@ -403,6 +531,29 @@ jQuery(document).ready(function($) {
         setTimeout(function() {
             $(`.notice-${type}`).fadeOut();
         }, 5000);
+    }
+    
+    function addTableHoverEffects() {
+        $('#user-activity-stats-table tbody tr').hover(
+            function() {
+                $(this).addClass('table-row-hover');
+            },
+            function() {
+                $(this).removeClass('table-row-hover');
+            }
+        );
+    }
+    
+    function getLastLoginClass(lastLogin) {
+        if (lastLogin === 'Never') return 'text-danger';
+        
+        const loginDate = new Date(lastLogin);
+        const now = new Date();
+        const daysDiff = (now - loginDate) / (1000 * 60 * 60 * 24);
+        
+        if (daysDiff <= 7) return 'text-success';
+        if (daysDiff <= 30) return 'text-warning';
+        return 'text-danger';
     }
     
     // Utility functions
@@ -472,6 +623,68 @@ jQuery(document).ready(function($) {
                 @keyframes fadeIn {
                     from { opacity: 0; transform: translateY(10px); }
                     to { opacity: 1; transform: translateY(0); }
+                }
+                
+                /* Index Status Styles */
+                .wbcom-index-status {
+                    background: #f8f9fa;
+                    border: 1px solid #e1e1e1;
+                    border-radius: 4px;
+                    padding: 15px;
+                    margin-bottom: 20px;
+                }
+                .index-info {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                }
+                .index-info p {
+                    margin: 0;
+                    color: #555;
+                }
+                
+                /* Progress Bar Styles */
+                .wbcom-index-progress {
+                    background: #fff;
+                    border: 1px solid #0073aa;
+                    border-radius: 4px;
+                    padding: 15px;
+                    margin: 15px 0;
+                    text-align: center;
+                }
+                .progress-bar {
+                    width: 100%;
+                    height: 20px;
+                    background: #f0f0f0;
+                    border-radius: 10px;
+                    overflow: hidden;
+                    margin-bottom: 10px;
+                }
+                .progress-fill {
+                    height: 100%;
+                    background: linear-gradient(90deg, #0073aa, #00a0d2);
+                    width: 0%;
+                    transition: width 0.3s ease;
+                    border-radius: 10px;
+                }
+                
+                /* Performance Indicator */
+                .performance-indicator {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 5px;
+                    background: #d4edda;
+                    color: #155724;
+                    padding: 5px 10px;
+                    border-radius: 3px;
+                    font-size: 12px;
+                    margin-left: 10px;
+                }
+                .performance-indicator .dashicons {
+                    font-size: 14px;
+                    width: 14px;
+                    height: 14px;
                 }
                 
                 /* Search and Sort Styles */
@@ -549,6 +762,22 @@ jQuery(document).ready(function($) {
                 }
                 .user-edit-link:hover .dashicons {
                     opacity: 1;
+                }
+                
+                /* Mobile Responsiveness */
+                @media (max-width: 768px) {
+                    .index-info {
+                        flex-direction: column;
+                        align-items: flex-start;
+                        gap: 10px;
+                    }
+                    .search-controls {
+                        flex-direction: column;
+                        align-items: stretch;
+                    }
+                    .search-input-wrapper {
+                        min-width: 100%;
+                    }
                 }
             </style>
         `);
