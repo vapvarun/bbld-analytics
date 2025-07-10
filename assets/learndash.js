@@ -1,5 +1,5 @@
 /**
- * Updated LearnDash Reports JavaScript - Fixed to handle LDTT data properly
+ * Updated LearnDash Reports JavaScript - Removed fake metrics (Avg Time & Rating)
  * 
  * @package Wbcom_Reports
  */
@@ -12,7 +12,6 @@ jQuery(document).ready(function($) {
     let currentFilter = 'all';
     let currentCourseFilter = 'all';
     let completionChart = null;
-    let trendsChart = null;
     
     // Initialize LearnDash reports
     initLearnDashReports();
@@ -141,9 +140,6 @@ jQuery(document).ready(function($) {
             case 'group-reports':
                 updateGroupAnalytics(data.group_analytics || []);
                 break;
-            case 'completion-rates':
-                updateCompletionTrends(data.completion_trends || []);
-                break;
         }
     }
     
@@ -218,11 +214,6 @@ jQuery(document).ready(function($) {
                                 ${formatDate(user.last_activity)}
                             </small>
                         </td>
-                        <td>
-                            <span class="time-spent text-primary">
-                                ${user.total_time_spent}
-                            </span>
-                        </td>
                     </tr>
                 `;
                 $tableBody.append(row);
@@ -231,7 +222,7 @@ jQuery(document).ready(function($) {
         } else {
             $tableBody.append(`
                 <tr>
-                    <td colspan="8" class="text-center">
+                    <td colspan="7" class="text-center">
                         <div class="no-data-message">
                             <p><em>No learning data found with the current filters.</em></p>
                             <p><small>Users need to be enrolled in courses and have progress data.</small></p>
@@ -302,12 +293,6 @@ jQuery(document).ready(function($) {
                                 ${course.completion_rate}
                             </span>
                         </td>
-                        <td>${course.avg_completion_time}</td>
-                        <td>
-                            <span class="rating text-warning">
-                                ${course.rating}
-                            </span>
-                        </td>
                     </tr>
                 `;
                 $tableBody.append(row);
@@ -319,7 +304,7 @@ jQuery(document).ready(function($) {
         } else {
             $tableBody.append(`
                 <tr>
-                    <td colspan="7" class="text-center">
+                    <td colspan="5" class="text-center">
                         <div class="no-data-message">
                             <p><em>No course analytics data available.</em></p>
                             <p><small>Make sure LearnDash courses exist and users are enrolled.</small></p>
@@ -395,21 +380,6 @@ jQuery(document).ready(function($) {
                         </div>
                     </td>
                 </tr>
-            `);
-        }
-    }
-    
-    function updateCompletionTrends(completionTrends) {
-        if (completionTrends && completionTrends.length > 0) {
-            createCompletionTrendsChart(completionTrends);
-        } else {
-            $('#completion-trends-chart').closest('.wbcom-chart-container').html(`
-                <div class="text-center no-data-message" style="padding: 100px;">
-                    <h3>No Completion Trends Available</h3>
-                    <p><em>No course completion data found.</em></p>
-                    <p><small>Data will appear here once users start completing courses.</small></p>
-                    <p><small>Use LearnDash Testing Toolkit to create test users with progress.</small></p>
-                </div>
             `);
         }
     }
@@ -556,69 +526,6 @@ jQuery(document).ready(function($) {
         });
     }
     
-    function createCompletionTrendsChart(data) {
-        const ctx = document.getElementById('completion-trends-chart');
-        if (!ctx) return;
-        
-        // Destroy existing chart
-        if (trendsChart) {
-            trendsChart.destroy();
-        }
-        
-        // Handle empty data
-        if (!data || data.length === 0) {
-            $(ctx).closest('.wbcom-chart-container').html(`
-                <div class="text-center no-data-message" style="padding: 100px;">
-                    <h3>No Completion Trends Available</h3>
-                    <p>Course completion data will appear here over time.</p>
-                    <p><small>Create test users with progress using LearnDash Testing Toolkit.</small></p>
-                </div>
-            `);
-            return;
-        }
-        
-        const chartData = {
-            labels: data.map(item => {
-                // Format month nicely
-                const [year, month] = item.month.split('-');
-                const date = new Date(year, month - 1);
-                return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
-            }),
-            datasets: [{
-                label: 'Course Completions',
-                data: data.map(item => item.completions || 0),
-                backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                borderColor: 'rgba(255, 99, 132, 1)',
-                borderWidth: 2,
-                fill: true,
-                tension: 0.4
-            }]
-        };
-        
-        trendsChart = new Chart(ctx, {
-            type: 'line',
-            data: chartData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Monthly Course Completion Trends'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            stepSize: 1
-                        }
-                    }
-                }
-            }
-        });
-    }
-    
     function applyLearningFilters() {
         currentFilter = $('#progress-filter').val();
         currentCourseFilter = $('#course-filter').val();
@@ -712,11 +619,11 @@ jQuery(document).ready(function($) {
         
         if (currentTab === 'user-progress') {
             $('#user-learning-stats-table tbody').html(`
-                <tr><td colspan="8" class="text-center wbcom-loading">Loading learning progress...</td></tr>
+                <tr><td colspan="7" class="text-center wbcom-loading">Loading learning progress...</td></tr>
             `);
         } else if (currentTab === 'course-analytics') {
             $('#course-analytics-table tbody').html(`
-                <tr><td colspan="7" class="text-center wbcom-loading">Loading course analytics...</td></tr>
+                <tr><td colspan="5" class="text-center wbcom-loading">Loading course analytics...</td></tr>
             `);
         } else if (currentTab === 'group-reports') {
             $('#group-analytics-table tbody').html(`
@@ -853,7 +760,6 @@ jQuery(document).ready(function($) {
                 }
                 
                 .course-count, .completion-count { font-size: 16px; }
-                .rating { font-weight: bold; }
                 .no-data-message {
                     padding: 40px 20px;
                     color: #666;

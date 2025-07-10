@@ -1,6 +1,6 @@
 <?php
 /**
- * Fixed BuddyPress Reports Class - Updated to handle both test and real data
+ * BuddyPress Reports Class - Clean Final Version
  * 
  * @package Wbcom_Reports
  */
@@ -45,7 +45,7 @@ class Wbcom_Reports_BuddyPress {
                         <span id="total-comments" class="stat-number">Loading...</span>
                     </div>
                     <div class="wbcom-stat-box">
-                        <h3><?php _e('Total Groups', 'wbcom-reports'); ?></h3>
+                        <h3><?php _e('New Users (30 days)', 'wbcom-reports'); ?></h3>
                         <span id="total-likes" class="stat-number">Loading...</span>
                     </div>
                 </div>
@@ -81,14 +81,12 @@ class Wbcom_Reports_BuddyPress {
                                 <th><?php _e('User Type', 'wbcom-reports'); ?></th>
                                 <th><?php _e('Registration Date', 'wbcom-reports'); ?></th>
                                 <th><?php _e('Last Login', 'wbcom-reports'); ?></th>
-                                <th><?php _e('Course Enrollments', 'wbcom-reports'); ?></th>
-                                <th><?php _e('Groups Joined', 'wbcom-reports'); ?></th>
-                                <th><?php _e('Course Progress', 'wbcom-reports'); ?></th>
+                                <th><?php _e('Activity Count', 'wbcom-reports'); ?></th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr>
-                                <td colspan="8"><?php _e('Loading...', 'wbcom-reports'); ?></td>
+                                <td colspan="6"><?php _e('Loading...', 'wbcom-reports'); ?></td>
                             </tr>
                         </tbody>
                     </table>
@@ -132,7 +130,7 @@ class Wbcom_Reports_BuddyPress {
             'total_users' => $this->get_total_users(),
             'total_activities' => $this->get_total_activities(),
             'total_comments' => $this->get_total_activity_comments(),
-            'total_likes' => $this->get_total_groups(), // Changed to groups since we're dealing with LearnDash + BP
+            'total_likes' => $this->get_new_users_30_days(),
             'user_stats' => $this->get_user_activity_stats($page, $filter, $date_from, $date_to),
             'pagination' => $this->get_pagination_info($page, $filter, $date_from, $date_to)
         );
@@ -141,7 +139,7 @@ class Wbcom_Reports_BuddyPress {
     }
     
     /**
-     * Get total users count - including both test and real users
+     * Get total users count
      */
     private function get_total_users() {
         $user_count = count_users();
@@ -149,15 +147,13 @@ class Wbcom_Reports_BuddyPress {
     }
     
     /**
-     * Get total activities count - from BP database tables only
+     * Get total activities count
      */
     private function get_total_activities() {
         global $wpdb;
         
-        // Check if BuddyPress activity table exists
         $bp_activity_table = $wpdb->prefix . 'bp_activity';
         if ($wpdb->get_var("SHOW TABLES LIKE '{$bp_activity_table}'") == $bp_activity_table) {
-            // Count all activity types including updates, comments, friendships, etc.
             $count = $wpdb->get_var("
                 SELECT COUNT(*) 
                 FROM {$bp_activity_table} 
@@ -170,12 +166,11 @@ class Wbcom_Reports_BuddyPress {
     }
     
     /**
-     * Get total activity comments - from BP database tables only
+     * Get total activity comments
      */
     private function get_total_activity_comments() {
         global $wpdb;
         
-        // Check if BuddyPress activity table exists
         $bp_activity_table = $wpdb->prefix . 'bp_activity';
         if ($wpdb->get_var("SHOW TABLES LIKE '{$bp_activity_table}'") == $bp_activity_table) {
             $count = $wpdb->get_var("
@@ -190,38 +185,26 @@ class Wbcom_Reports_BuddyPress {
     }
     
     /**
-     * Get total groups count
+     * Get new users in last 30 days
      */
-    private function get_total_groups() {
-        global $wpdb;
+    private function get_new_users_30_days() {
+        $thirty_days_ago = date('Y-m-d H:i:s', strtotime('-30 days'));
         
-        // Check BuddyPress groups first
-        $bp_groups_table = $wpdb->prefix . 'bp_groups';
-        if ($wpdb->get_var("SHOW TABLES LIKE '{$bp_groups_table}'") == $bp_groups_table) {
-            $bp_groups = $wpdb->get_var("SELECT COUNT(*) FROM {$bp_groups_table}");
-        } else {
-            $bp_groups = 0;
-        }
-        
-        // Count LearnDash groups
-        $ld_group_post_type = 'groups';
-        if (function_exists('learndash_get_post_type_slug')) {
-            $ld_group_post_type = learndash_get_post_type_slug('group');
-        }
-        
-        $ld_groups = get_posts(array(
-            'post_type' => $ld_group_post_type,
-            'numberposts' => -1,
-            'post_status' => 'publish'
+        $user_query = new WP_User_Query(array(
+            'date_query' => array(
+                array(
+                    'after' => $thirty_days_ago,
+                    'inclusive' => true
+                )
+            ),
+            'count_total' => true
         ));
         
-        $ld_groups_count = is_array($ld_groups) ? count($ld_groups) : 0;
-        
-        return intval($bp_groups) + $ld_groups_count;
+        return intval($user_query->get_total());
     }
     
     /**
-     * Get user activity statistics with pagination and filters - corrected for LDTT data
+     * Get user activity statistics with pagination and filters
      */
     private function get_user_activity_stats($page = 1, $filter = 'all', $date_from = '', $date_to = '') {
         $per_page = 20;
@@ -258,14 +241,8 @@ class Wbcom_Reports_BuddyPress {
             );
         } elseif ($filter === 'active') {
             $users_args['meta_query'] = array(
-                'relation' => 'OR',
                 array(
                     'key' => 'last_login',
-                    'value' => strtotime('-30 days'),
-                    'compare' => '>='
-                ),
-                array(
-                    'key' => '_ldtt_progress_created',
                     'value' => strtotime('-30 days'),
                     'compare' => '>='
                 )
@@ -287,9 +264,7 @@ class Wbcom_Reports_BuddyPress {
         
         foreach ($users as $user) {
             $user_type = $this->get_user_type($user->ID);
-            $course_enrollments = $this->get_user_course_enrollments($user->ID);
-            $groups_joined = $this->get_user_groups($user->ID);
-            $progress_summary = $this->get_user_progress_summary($user->ID);
+            $activity_count = $this->get_user_activity_count($user->ID);
             
             $user_stats[] = array(
                 'display_name' => $user->display_name,
@@ -297,9 +272,7 @@ class Wbcom_Reports_BuddyPress {
                 'user_type' => $user_type,
                 'registration_date' => date('Y-m-d H:i:s', strtotime($user->user_registered)),
                 'last_login' => Wbcom_Reports_Helpers::get_user_last_login($user->ID),
-                'course_enrollments' => $course_enrollments,
-                'groups_joined' => $groups_joined,
-                'course_progress' => $progress_summary
+                'activity_count' => $activity_count
             );
         }
         
@@ -307,7 +280,7 @@ class Wbcom_Reports_BuddyPress {
     }
     
     /**
-     * Get user type (test user or regular)
+     * Get user type
      */
     private function get_user_type($user_id) {
         $is_test_user = get_user_meta($user_id, '_ldtt_test_user', true);
@@ -324,98 +297,28 @@ class Wbcom_Reports_BuddyPress {
     }
     
     /**
-     * Get user course enrollments count
+     * Get user BuddyPress activity count
      */
-    private function get_user_course_enrollments($user_id) {
+    private function get_user_activity_count($user_id) {
+        if (!Wbcom_Reports_Helpers::is_buddypress_active()) {
+            return 0;
+        }
+        
         global $wpdb;
+        $bp_activity_table = $wpdb->prefix . 'bp_activity';
         
-        $enrollments = 0;
-        
-        // Count LDTT progress courses
-        $ldtt_courses = $wpdb->get_var($wpdb->prepare("
-            SELECT COUNT(*) 
-            FROM {$wpdb->usermeta} 
-            WHERE user_id = %d 
-            AND meta_key LIKE '_ldtt_progress_course_%%'
-        ", $user_id));
-        
-        $enrollments += intval($ldtt_courses);
-        
-        // Count regular LearnDash enrollments
-        $course_access = get_user_meta($user_id, '_sfwd-course_progress', true);
-        if (is_array($course_access)) {
-            $enrollments += count($course_access);
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$bp_activity_table}'") == $bp_activity_table) {
+            $count = $wpdb->get_var($wpdb->prepare("
+                SELECT COUNT(*) 
+                FROM {$bp_activity_table} 
+                WHERE user_id = %d 
+                AND component = 'activity' 
+                AND type = 'activity_update'
+            ", $user_id));
+            return intval($count);
         }
         
-        return $enrollments;
-    }
-    
-    /**
-     * Get user groups (both BuddyPress and LearnDash)
-     */
-    private function get_user_groups($user_id) {
-        $groups_count = 0;
-        
-        // BuddyPress groups
-        if (function_exists('groups_get_user_groups')) {
-            $bp_groups = groups_get_user_groups($user_id);
-            if (is_array($bp_groups) && isset($bp_groups['groups'])) {
-                $groups_count += count($bp_groups['groups']);
-            }
-        }
-        
-        // LearnDash groups
-        if (function_exists('learndash_get_users_group_ids')) {
-            $ld_groups = learndash_get_users_group_ids($user_id);
-            if (is_array($ld_groups)) {
-                $groups_count += count($ld_groups);
-            }
-        }
-        
-        return $groups_count;
-    }
-    
-    /**
-     * Get user progress summary
-     */
-    private function get_user_progress_summary($user_id) {
-        global $wpdb;
-        
-        // Get LDTT progress
-        $progress_data = $wpdb->get_results($wpdb->prepare("
-            SELECT meta_value 
-            FROM {$wpdb->usermeta} 
-            WHERE user_id = %d 
-            AND meta_key LIKE '_ldtt_progress_course_%%'
-        ", $user_id));
-        
-        if (empty($progress_data)) {
-            return 'No progress data';
-        }
-        
-        $total_progress = 0;
-        $course_count = 0;
-        $completed_courses = 0;
-        
-        foreach ($progress_data as $progress) {
-            $data = maybe_unserialize($progress->meta_value);
-            if (is_array($data) && isset($data['completion_rate'])) {
-                $completion_rate = floatval($data['completion_rate']);
-                $total_progress += $completion_rate;
-                $course_count++;
-                
-                if ($completion_rate >= 100) {
-                    $completed_courses++;
-                }
-            }
-        }
-        
-        if ($course_count === 0) {
-            return 'No progress data';
-        }
-        
-        $avg_progress = round($total_progress / $course_count, 1);
-        return "{$completed_courses}/{$course_count} completed (Avg: {$avg_progress}%)";
+        return 0;
     }
     
     /**
@@ -450,14 +353,8 @@ class Wbcom_Reports_BuddyPress {
             );
         } elseif ($filter === 'active') {
             $users_args['meta_query'] = array(
-                'relation' => 'OR',
                 array(
                     'key' => 'last_login',
-                    'value' => strtotime('-30 days'),
-                    'compare' => '>='
-                ),
-                array(
-                    'key' => '_ldtt_progress_created',
                     'value' => strtotime('-30 days'),
                     'compare' => '>='
                 )

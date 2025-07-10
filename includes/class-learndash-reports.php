@@ -1,6 +1,6 @@
 <?php
 /**
- * Fixed LearnDash Reports Class - Updated to properly fetch LDTT test data
+ * Fixed LearnDash Reports Class - Removed fake metrics (Avg Time & Rating)
  * 
  * @package Wbcom_Reports
  */
@@ -65,7 +65,6 @@ class Wbcom_Reports_LearnDash {
                             <button class="tab-button active" data-tab="user-progress"><?php _e('User Progress', 'wbcom-reports'); ?></button>
                             <button class="tab-button" data-tab="course-analytics"><?php _e('Course Analytics', 'wbcom-reports'); ?></button>
                             <button class="tab-button" data-tab="group-reports"><?php _e('Group Reports', 'wbcom-reports'); ?></button>
-                            <button class="tab-button" data-tab="completion-rates"><?php _e('Completion Rates', 'wbcom-reports'); ?></button>
                         </div>
                         
                         <div id="user-progress" class="tab-content active">
@@ -94,12 +93,11 @@ class Wbcom_Reports_LearnDash {
                                             <th><?php _e('In Progress', 'wbcom-reports'); ?></th>
                                             <th><?php _e('Course Progress', 'wbcom-reports'); ?></th>
                                             <th><?php _e('Last Activity', 'wbcom-reports'); ?></th>
-                                            <th><?php _e('Time Spent', 'wbcom-reports'); ?></th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <tr>
-                                            <td colspan="8"><?php _e('Loading...', 'wbcom-reports'); ?></td>
+                                            <td colspan="7"><?php _e('Loading...', 'wbcom-reports'); ?></td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -120,13 +118,11 @@ class Wbcom_Reports_LearnDash {
                                             <th><?php _e('Completed', 'wbcom-reports'); ?></th>
                                             <th><?php _e('In Progress', 'wbcom-reports'); ?></th>
                                             <th><?php _e('Completion Rate', 'wbcom-reports'); ?></th>
-                                            <th><?php _e('Avg. Time to Complete', 'wbcom-reports'); ?></th>
-                                            <th><?php _e('Rating', 'wbcom-reports'); ?></th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <tr>
-                                            <td colspan="7"><?php _e('Loading...', 'wbcom-reports'); ?></td>
+                                            <td colspan="5"><?php _e('Loading...', 'wbcom-reports'); ?></td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -168,15 +164,6 @@ class Wbcom_Reports_LearnDash {
                                         </tr>
                                     </tbody>
                                 </table>
-                            </div>
-                        </div>
-                        
-                        <div id="completion-rates" class="tab-content">
-                            <div class="wbcom-user-stats">
-                                <h2><?php _e('Monthly Completion Rates', 'wbcom-reports'); ?></h2>
-                                <div class="wbcom-chart-container">
-                                    <canvas id="completion-trends-chart"></canvas>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -222,8 +209,6 @@ class Wbcom_Reports_LearnDash {
                 $stats['course_analytics'] = $this->get_course_analytics();
             } elseif ($tab === 'group-reports') {
                 $stats['group_analytics'] = $this->get_group_analytics($filter);
-            } elseif ($tab === 'completion-rates') {
-                $stats['completion_trends'] = $this->get_completion_trends();
             }
             
             wp_send_json_success($stats);
@@ -402,8 +387,7 @@ class Wbcom_Reports_LearnDash {
                 'in_progress' => max(0, $user_data['enrolled_courses'] - $user_data['completed_courses']),
                 'course_progress' => $user_data['course_progress'],
                 'avg_progress' => $user_data['avg_progress'],
-                'last_activity' => $user_data['last_activity'],
-                'total_time_spent' => $user_data['total_time_spent']
+                'last_activity' => $user_data['last_activity']
             );
         }
         
@@ -524,16 +508,12 @@ class Wbcom_Reports_LearnDash {
             }
         }
         
-        // Get time spent (placeholder for now)
-        $total_time_spent = get_user_meta($user_id, '_ldtt_total_learning_time', true) ?: '0 hrs';
-        
         return array(
             'enrolled_courses' => $enrolled_courses,
             'completed_courses' => $completed_courses,
             'course_progress' => $course_progress,
             'avg_progress' => $avg_progress,
-            'last_activity' => $last_activity,
-            'total_time_spent' => $total_time_spent
+            'last_activity' => $last_activity
         );
     }
     
@@ -588,9 +568,7 @@ class Wbcom_Reports_LearnDash {
                 'enrolled_users' => $enrolled_count,
                 'completed' => $completed_count,
                 'in_progress' => max(0, $enrolled_count - $completed_count),
-                'completion_rate' => $enrolled_count > 0 ? round(($completed_count / $enrolled_count) * 100, 1) . '%' : '0%',
-                'avg_completion_time' => $this->estimate_avg_completion_time($course->ID),
-                'rating' => $this->get_course_rating($course->ID)
+                'completion_rate' => $enrolled_count > 0 ? round(($completed_count / $enrolled_count) * 100, 1) . '%' : '0%'
             );
         }
         
@@ -682,127 +660,6 @@ class Wbcom_Reports_LearnDash {
         }
         
         return array_unique(array_filter($completed_users));
-    }
-    
-    /**
-     * Estimate average completion time
-     */
-    private function estimate_avg_completion_time($course_id) {
-        // This is a placeholder - could be enhanced with actual time tracking
-        $lesson_count = $this->get_course_lesson_count($course_id);
-        $estimated_hours = $lesson_count * 0.5; // Assume 30 minutes per lesson
-        
-        if ($estimated_hours < 1) {
-            return '30 min';
-        } elseif ($estimated_hours < 24) {
-            return round($estimated_hours, 1) . ' hrs';
-        } else {
-            $days = round($estimated_hours / 8, 1); // 8 hour work day
-            return $days . ' days';
-        }
-    }
-    
-    /**
-     * Get course lesson count
-     */
-    private function get_course_lesson_count($course_id) {
-        $lesson_post_type = 'sfwd-lessons';
-        if (function_exists('learndash_get_post_type_slug')) {
-            $lesson_post_type = learndash_get_post_type_slug('lesson');
-        }
-        
-        $lessons = get_posts(array(
-            'post_type' => $lesson_post_type,
-            'meta_query' => array(
-                array(
-                    'key' => 'course_id',
-                    'value' => $course_id,
-                    'compare' => '='
-                )
-            ),
-            'numberposts' => -1,
-            'post_status' => 'publish'
-        ));
-        
-        return is_array($lessons) ? count($lessons) : 0;
-    }
-    
-    /**
-     * Get course rating (placeholder)
-     */
-    private function get_course_rating($course_id) {
-        // This is a placeholder - could be enhanced with actual rating system
-        return '4.' . wp_rand(0, 9) . '/5';
-    }
-    
-    /**
-     * Get completion trends for chart - corrected to use actual data
-     */
-    private function get_completion_trends() {
-        global $wpdb;
-        
-        $trends = array();
-        
-        // Get LDTT completion trends
-        $ldtt_trends = $wpdb->get_results("
-            SELECT 
-                DATE_FORMAT(FROM_UNIXTIME(meta_value), '%Y-%m') as month,
-                COUNT(*) as completions
-            FROM {$wpdb->usermeta} 
-            WHERE meta_key = '_ldtt_progress_created' 
-            AND meta_value >= UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL 12 MONTH))
-            GROUP BY month
-            ORDER BY month
-        ");
-        
-        foreach ($ldtt_trends as $trend) {
-            $trends[] = array(
-                'month' => $trend->month,
-                'completions' => intval($trend->completions)
-            );
-        }
-        
-        // Get LearnDash completion trends
-        $ld_table = $wpdb->prefix . 'learndash_user_activity';
-        if ($wpdb->get_var("SHOW TABLES LIKE '{$ld_table}'") == $ld_table) {
-            $ld_trends = $wpdb->get_results("
-                SELECT 
-                    DATE_FORMAT(activity_updated, '%Y-%m') as month,
-                    COUNT(*) as completions
-                FROM {$ld_table} 
-                WHERE activity_type = 'course' 
-                AND activity_completed = 1 
-                AND activity_updated >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
-                GROUP BY month
-                ORDER BY month
-            ");
-            
-            // Merge LD trends with LDTT trends
-            foreach ($ld_trends as $ld_trend) {
-                $found = false;
-                for ($i = 0; $i < count($trends); $i++) {
-                    if ($trends[$i]['month'] === $ld_trend->month) {
-                        $trends[$i]['completions'] += intval($ld_trend->completions);
-                        $found = true;
-                        break;
-                    }
-                }
-                
-                if (!$found) {
-                    $trends[] = array(
-                        'month' => $ld_trend->month,
-                        'completions' => intval($ld_trend->completions)
-                    );
-                }
-            }
-        }
-        
-        // Sort by month
-        usort($trends, function($a, $b) {
-            return strcmp($a['month'], $b['month']);
-        });
-        
-        return $trends;
     }
     
     /**

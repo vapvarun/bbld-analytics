@@ -23,6 +23,9 @@ define('WBCOM_REPORTS_VERSION', '1.0');
 class Wbcom_Reports_Main {
     
     public function __construct() {
+        // Include files early so they're available for activation hook
+        $this->include_files();
+        
         add_action('init', array($this, 'init'));
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_scripts'));
@@ -40,19 +43,17 @@ class Wbcom_Reports_Main {
     public function init() {
         // Load text domain
         load_plugin_textdomain('wbcom-reports', false, dirname(plugin_basename(__FILE__)) . '/languages');
-        
-        // Include required files
-        $this->include_files();
     }
     
     /**
      * Include required files
      */
     private function include_files() {
+        // Include helpers first since other classes depend on it
+        require_once WBCOM_REPORTS_PLUGIN_DIR . 'includes/class-helpers.php';
         require_once WBCOM_REPORTS_PLUGIN_DIR . 'includes/class-dashboard.php';
         require_once WBCOM_REPORTS_PLUGIN_DIR . 'includes/class-buddypress-reports.php';
         require_once WBCOM_REPORTS_PLUGIN_DIR . 'includes/class-learndash-reports.php';
-        require_once WBCOM_REPORTS_PLUGIN_DIR . 'includes/class-helpers.php';
     }
     
     /**
@@ -144,29 +145,52 @@ class Wbcom_Reports_Main {
         // Suppress any output during index creation
         ob_start();
         
-        // BuddyPress indexes
-        if (Wbcom_Reports_Helpers::is_buddypress_active()) {
-            $activity_table = $wpdb->prefix . 'bp_activity';
-            $wpdb->query("CREATE INDEX IF NOT EXISTS idx_bp_activity_user_id ON {$activity_table} (user_id)");
-            $wpdb->query("CREATE INDEX IF NOT EXISTS idx_bp_activity_component_type ON {$activity_table} (component, type)");
-            $wpdb->query("CREATE INDEX IF NOT EXISTS idx_bp_activity_date_recorded ON {$activity_table} (date_recorded)");
+        try {
+            // Check if BuddyPress is active using direct class check instead of helper
+            $is_buddypress_active = class_exists('BuddyPress');
             
-            $activity_meta_table = $wpdb->prefix . 'bp_activity_meta';
-            if ($wpdb->get_var("SHOW TABLES LIKE '{$activity_meta_table}'")) {
-                $wpdb->query("CREATE INDEX IF NOT EXISTS idx_bp_activity_meta_key_value ON {$activity_meta_table} (meta_key, meta_value)");
+            // BuddyPress indexes
+            if ($is_buddypress_active) {
+                $activity_table = $wpdb->prefix . 'bp_activity';
+                
+                // Check if table exists before creating indexes
+                if ($wpdb->get_var("SHOW TABLES LIKE '{$activity_table}'") == $activity_table) {
+                    $wpdb->query("CREATE INDEX IF NOT EXISTS idx_bp_activity_user_id ON {$activity_table} (user_id)");
+                    $wpdb->query("CREATE INDEX IF NOT EXISTS idx_bp_activity_component_type ON {$activity_table} (component, type)");
+                    $wpdb->query("CREATE INDEX IF NOT EXISTS idx_bp_activity_date_recorded ON {$activity_table} (date_recorded)");
+                }
+                
+                $activity_meta_table = $wpdb->prefix . 'bp_activity_meta';
+                if ($wpdb->get_var("SHOW TABLES LIKE '{$activity_meta_table}'") == $activity_meta_table) {
+                    $wpdb->query("CREATE INDEX IF NOT EXISTS idx_bp_activity_meta_key_value ON {$activity_meta_table} (meta_key, meta_value)");
+                }
+                
+                $groups_table = $wpdb->prefix . 'bp_groups';
+                if ($wpdb->get_var("SHOW TABLES LIKE '{$groups_table}'") == $groups_table) {
+                    $wpdb->query("CREATE INDEX IF NOT EXISTS idx_bp_groups_date_created ON {$groups_table} (date_created)");
+                }
             }
             
-            $groups_table = $wpdb->prefix . 'bp_groups';
-            $wpdb->query("CREATE INDEX IF NOT EXISTS idx_bp_groups_date_created ON {$groups_table} (date_created)");
-        }
-        
-        // LearnDash indexes
-        if (Wbcom_Reports_Helpers::is_learndash_active()) {
-            $ld_activity_table = $wpdb->prefix . 'learndash_user_activity';
-            if ($wpdb->get_var("SHOW TABLES LIKE '{$ld_activity_table}'")) {
-                $wpdb->query("CREATE INDEX IF NOT EXISTS idx_ld_user_activity_user_id ON {$ld_activity_table} (user_id)");
-                $wpdb->query("CREATE INDEX IF NOT EXISTS idx_ld_user_activity_type ON {$ld_activity_table} (activity_type)");
-                $wpdb->query("CREATE INDEX IF NOT EXISTS idx_ld_user_activity_updated ON {$ld_activity_table} (activity_updated)");
+            // Check if LearnDash is active using direct class check instead of helper
+            $is_learndash_active = class_exists('SFWD_LMS');
+            
+            // LearnDash indexes
+            if ($is_learndash_active) {
+                $ld_activity_table = $wpdb->prefix . 'learndash_user_activity';
+                if ($wpdb->get_var("SHOW TABLES LIKE '{$ld_activity_table}'") == $ld_activity_table) {
+                    $wpdb->query("CREATE INDEX IF NOT EXISTS idx_ld_user_activity_user_id ON {$ld_activity_table} (user_id)");
+                    $wpdb->query("CREATE INDEX IF NOT EXISTS idx_ld_user_activity_type ON {$ld_activity_table} (activity_type)");
+                    $wpdb->query("CREATE INDEX IF NOT EXISTS idx_ld_user_activity_updated ON {$ld_activity_table} (activity_updated)");
+                }
+            }
+            
+            // Index for user meta to improve query performance
+            $wpdb->query("CREATE INDEX IF NOT EXISTS idx_usermeta_key_value ON {$wpdb->usermeta} (meta_key, meta_value(100))");
+            
+        } catch (Exception $e) {
+            // Log error if WP_DEBUG is enabled, but don't break activation
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('Wbcom Reports index creation error: ' . $e->getMessage());
             }
         }
         

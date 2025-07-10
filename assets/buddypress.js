@@ -1,5 +1,5 @@
 /**
- * BuddyPress Reports JavaScript
+ * BuddyPress Reports JavaScript - Simplified WordPress User Reports
  * 
  * @package Wbcom_Reports
  */
@@ -133,6 +133,7 @@ jQuery(document).ready(function($) {
                             <br><small class="text-muted">${escapeHtml(user.user_login)}</small>
                         </td>
                         <td><code>${escapeHtml(user.user_login)}</code></td>
+                        <td>${escapeHtml(user.user_type)}</td>
                         <td><small>${formatDate(user.registration_date)}</small></td>
                         <td>
                             <small class="${getLastLoginClass(user.last_login)}">
@@ -140,23 +141,8 @@ jQuery(document).ready(function($) {
                             </small>
                         </td>
                         <td>
-                            <span class="activity-count font-bold text-primary">
+                            <span class="activity-count text-success font-bold">
                                 ${formatNumber(user.activity_count)}
-                            </span>
-                        </td>
-                        <td>
-                            <span class="comment-count">
-                                ${formatNumber(user.comment_count)}
-                            </span>
-                        </td>
-                        <td>
-                            <span class="like-count text-success">
-                                ${formatNumber(user.like_count)}
-                            </span>
-                        </td>
-                        <td>
-                            <span class="profile-views text-warning">
-                                ${formatNumber(user.profile_views || 0)}
                             </span>
                         </td>
                     </tr>
@@ -170,7 +156,7 @@ jQuery(document).ready(function($) {
         } else {
             $tableBody.append(`
                 <tr>
-                    <td colspan="8" class="text-center">
+                    <td colspan="6" class="text-center">
                         <div class="no-data-message">
                             <p><em>No user data found with the current filters.</em></p>
                             <p><small>Try adjusting your filter criteria or date range.</small></p>
@@ -271,7 +257,7 @@ jQuery(document).ready(function($) {
         // Show loading in table
         $('#user-activity-stats-table tbody').html(`
             <tr>
-                <td colspan="8" class="text-center wbcom-loading">
+                <td colspan="6" class="text-center wbcom-loading">
                     Loading user activity data...
                 </td>
             </tr>
@@ -362,7 +348,7 @@ jQuery(document).ready(function($) {
                     transition: all 0.2s ease;
                 }
                 .activity-count {
-                    font-size: 16px;
+                    font-weight: bold;
                 }
                 .no-data-message {
                     padding: 40px 20px;

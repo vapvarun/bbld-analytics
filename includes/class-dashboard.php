@@ -1,6 +1,6 @@
 <?php
 /**
- * Dashboard Reports Class
+ * Dashboard Reports Class - Removed BuddyPress Groups
  * 
  * @package Wbcom_Reports
  */
@@ -39,7 +39,7 @@ class Wbcom_Reports_Dashboard {
                         <span id="total-courses" class="stat-number">Loading...</span>
                     </div>
                     <div class="wbcom-stat-box">
-                        <h3><?php _e('Active Groups', 'wbcom-reports'); ?></h3>
+                        <h3><?php _e('New Users (30 days)', 'wbcom-reports'); ?></h3>
                         <span id="total-groups" class="stat-number">Loading...</span>
                     </div>
                 </div>
@@ -76,16 +76,16 @@ class Wbcom_Reports_Dashboard {
                     
                     <div class="wbcom-table-section">
                         <div class="wbcom-user-stats">
-                            <h2><?php _e('Top Groups by Members (BuddyPress)', 'wbcom-reports'); ?></h2>
+                            <h2><?php _e('Top LearnDash Groups by Members', 'wbcom-reports'); ?></h2>
                             <table id="top-groups-table" class="widefat fixed striped">
                                 <thead>
                                     <tr>
                                         <th><?php _e('Rank', 'wbcom-reports'); ?></th>
                                         <th><?php _e('Group Name', 'wbcom-reports'); ?></th>
-                                        <th><?php _e('Description', 'wbcom-reports'); ?></th>
-                                        <th><?php _e('Member Count', 'wbcom-reports'); ?></th>
+                                        <th><?php _e('Members Count', 'wbcom-reports'); ?></th>
+                                        <th><?php _e('Group Leaders', 'wbcom-reports'); ?></th>
+                                        <th><?php _e('Associated Courses', 'wbcom-reports'); ?></th>
                                         <th><?php _e('Created Date', 'wbcom-reports'); ?></th>
-                                        <th><?php _e('Status', 'wbcom-reports'); ?></th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -119,9 +119,9 @@ class Wbcom_Reports_Dashboard {
             'total_users' => $this->get_total_users(),
             'total_activities' => $this->get_total_activities(),
             'total_courses' => Wbcom_Reports_Helpers::is_learndash_active() ? $this->get_total_courses() : 0,
-            'total_groups' => Wbcom_Reports_Helpers::is_buddypress_active() ? $this->get_total_bp_groups() : 0,
+            'total_groups' => $this->get_new_users_30_days(),
             'top_users' => $this->get_top_active_users(),
-            'top_groups' => $this->get_top_groups_by_members()
+            'top_groups' => $this->get_top_learndash_groups()
         );
         
         wp_send_json_success($stats);
@@ -156,15 +156,22 @@ class Wbcom_Reports_Dashboard {
     }
     
     /**
-     * Get total BuddyPress groups
+     * Get new users in last 30 days
      */
-    private function get_total_bp_groups() {
-        if (!Wbcom_Reports_Helpers::is_buddypress_active()) return 0;
+    private function get_new_users_30_days() {
+        $thirty_days_ago = date('Y-m-d H:i:s', strtotime('-30 days'));
         
-        global $wpdb;
-        $groups_table = $wpdb->prefix . 'bp_groups';
-        $count = $wpdb->get_var("SELECT COUNT(*) FROM {$groups_table}");
-        return intval($count);
+        $user_query = new WP_User_Query(array(
+            'date_query' => array(
+                array(
+                    'after' => $thirty_days_ago,
+                    'inclusive' => true
+                )
+            ),
+            'count_total' => true
+        ));
+        
+        return intval($user_query->get_total());
     }
     
     /**
@@ -214,43 +221,87 @@ class Wbcom_Reports_Dashboard {
     }
     
     /**
-     * Get top groups by member count
+     * Get top LearnDash groups by member count
      */
-    private function get_top_groups_by_members($limit = 10) {
-        if (!Wbcom_Reports_Helpers::is_buddypress_active()) {
+    private function get_top_learndash_groups($limit = 25) {
+        if (!Wbcom_Reports_Helpers::is_learndash_active()) {
             return array();
         }
         
-        global $wpdb;
-        $groups_table = $wpdb->prefix . 'bp_groups';
-        $groupmeta_table = $wpdb->prefix . 'bp_groups_groupmeta';
+        $group_post_type = 'groups';
+        if (function_exists('learndash_get_post_type_slug')) {
+            $group_post_type = learndash_get_post_type_slug('group');
+        }
         
-        $results = $wpdb->get_results($wpdb->prepare("
-            SELECT 
-                g.id,
-                g.name,
-                g.description,
-                g.status,
-                g.date_created,
-                COALESCE(gm.meta_value, 0) as member_count
-            FROM {$groups_table} g
-            LEFT JOIN {$groupmeta_table} gm ON g.id = gm.group_id AND gm.meta_key = 'total_member_count'
-            ORDER BY CAST(COALESCE(gm.meta_value, 0) AS UNSIGNED) DESC
-            LIMIT %d
-        ", $limit));
+        $groups = get_posts(array(
+            'post_type' => $group_post_type,
+            'numberposts' => -1,
+            'post_status' => 'publish',
+            'orderby' => 'title',
+            'order' => 'ASC'
+        ));
         
-        $top_groups = array();
+        if (empty($groups)) {
+            return array();
+        }
+        
+        $groups_data = array();
+        
+        foreach ($groups as $group) {
+            $group_users = array();
+            $members_count = 0;
+            
+            // Get group users
+            if (function_exists('learndash_get_groups_users')) {
+                $group_users = learndash_get_groups_users($group->ID);
+                $members_count = is_array($group_users) ? count($group_users) : 0;
+            }
+            
+            // Get group leaders
+            $leaders_names = 'No Leaders';
+            if (function_exists('learndash_get_groups_administrators')) {
+                $group_leaders = learndash_get_groups_administrators($group->ID);
+                if (!empty($group_leaders)) {
+                    $leader_names = array();
+                    foreach ($group_leaders as $leader_id) {
+                        $leader = get_user_by('ID', $leader_id);
+                        if ($leader) {
+                            $leader_names[] = $leader->display_name;
+                        }
+                    }
+                    if (!empty($leader_names)) {
+                        $leaders_names = implode(', ', $leader_names);
+                    }
+                }
+            }
+            
+            // Get associated courses count
+            $courses_count = 0;
+            if (function_exists('learndash_group_enrolled_courses')) {
+                $group_courses = learndash_group_enrolled_courses($group->ID);
+                $courses_count = is_array($group_courses) ? count($group_courses) : 0;
+            }
+            
+            $groups_data[] = array(
+                'group_name' => $group->post_title,
+                'members_count' => $members_count,
+                'group_leaders' => $leaders_names,
+                'courses_count' => $courses_count,
+                'created_date' => date('Y-m-d', strtotime($group->post_date))
+            );
+        }
+        
+        // Sort by member count (descending)
+        usort($groups_data, function($a, $b) {
+            return $b['members_count'] - $a['members_count'];
+        });
+        
+        // Limit to top 25 and add rank
+        $top_groups = array_slice($groups_data, 0, $limit);
         $rank = 1;
         
-        foreach ($results as $group) {
-            $top_groups[] = array(
-                'rank' => $rank++,
-                'name' => $group->name,
-                'description' => wp_trim_words($group->description, 10),
-                'member_count' => intval($group->member_count),
-                'date_created' => date('Y-m-d', strtotime($group->date_created)),
-                'status' => ucfirst($group->status)
-            );
+        foreach ($top_groups as &$group) {
+            $group['rank'] = $rank++;
         }
         
         return $top_groups;
@@ -259,4 +310,3 @@ class Wbcom_Reports_Dashboard {
 
 // Initialize dashboard
 new Wbcom_Reports_Dashboard();
-?>

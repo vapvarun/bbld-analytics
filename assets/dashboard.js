@@ -1,5 +1,5 @@
 /**
- * Dashboard JavaScript
+ * Dashboard JavaScript - Updated with LearnDash Groups
  * 
  * @package Wbcom_Reports
  */
@@ -64,7 +64,7 @@ jQuery(document).ready(function($) {
         // Update top users table
         updateTopUsersTable(data.top_users);
         
-        // Update top groups table
+        // Update top LearnDash groups table
         updateTopGroupsTable(data.top_groups);
     }
     
@@ -117,17 +117,19 @@ jQuery(document).ready(function($) {
                     <tr class="fade-in">
                         <td><strong class="text-primary">#${group.rank}</strong></td>
                         <td>
-                            <strong>${escapeHtml(group.name)}</strong>
+                            <strong>${escapeHtml(group.group_name)}</strong>
                         </td>
                         <td>
-                            <small>${escapeHtml(group.description) || 'No description'}</small>
+                            <span class="font-bold text-success">${formatNumber(group.members_count)}</span>
                         </td>
-                        <td><span class="font-bold text-success">${formatNumber(group.member_count)}</span></td>
-                        <td><small>${formatDate(group.date_created)}</small></td>
                         <td>
-                            <span class="status-badge status-${group.status.toLowerCase()}">
-                                ${escapeHtml(group.status)}
-                            </span>
+                            <small>${escapeHtml(group.group_leaders)}</small>
+                        </td>
+                        <td>
+                            <span class="text-warning">${formatNumber(group.courses_count)}</span>
+                        </td>
+                        <td>
+                            <small>${formatDate(group.created_date)}</small>
                         </td>
                     </tr>
                 `;
@@ -137,7 +139,7 @@ jQuery(document).ready(function($) {
             $tableBody.append(`
                 <tr>
                     <td colspan="6" class="text-center">
-                        <em>No groups found. Create some groups to see them here.</em>
+                        <em>No LearnDash groups found. Create groups to see them here.</em>
                     </td>
                 </tr>
             `);
@@ -209,16 +211,6 @@ jQuery(document).ready(function($) {
     if (!$('#wbcom-dynamic-styles').length) {
         $('head').append(`
             <style id="wbcom-dynamic-styles">
-                .status-badge {
-                    padding: 2px 8px;
-                    border-radius: 3px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    text-transform: uppercase;
-                }
-                .status-public { background: #46b450; color: white; }
-                .status-private { background: #dc3232; color: white; }
-                .status-hidden { background: #666; color: white; }
                 .text-muted { color: #666; }
             </style>
         `);
