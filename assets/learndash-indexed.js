@@ -147,6 +147,281 @@ jQuery(document).ready(function($) {
             currentGroupPage = 1;
             loadFilteredGroups();
         });
+        
+        // Bind group details events
+        bindGroupDetailsEvents();
+    }
+    
+    function bindGroupDetailsEvents() {
+        // Group details pagination
+        $('#prev-groups-page').on('click', function() {
+            if (currentGroupPage > 1) {
+                currentGroupPage--;
+                loadGroupDetailsTable();
+            }
+        });
+        
+        $('#next-groups-page').on('click', function() {
+            currentGroupPage++;
+            loadGroupDetailsTable();
+        });
+        
+        $('#groups-per-page').on('change', function() {
+            currentGroupPerPage = parseInt($(this).val());
+            currentGroupPage = 1;
+            loadGroupDetailsTable();
+        });
+        
+        // Filter change events for group details
+        $('#activity-level-filter, #size-filter, #performance-filter').on('change', function() {
+            currentActivityLevelFilter = $('#activity-level-filter').val();
+            currentSizeFilter = $('#size-filter').val();
+            currentPerformanceFilter = $('#performance-filter').val();
+            currentGroupPage = 1; // Reset to first page when filters change
+        });
+        
+        // Apply filters button
+        $('#apply-group-filters').on('click', function() {
+            loadGroupDetailsTable();
+        });
+        
+        // Sortable headers for group details table
+        $('#group-details-table .sortable').on('click', function() {
+            const sortBy = $(this).data('sort');
+            
+            if (currentSortBy === sortBy) {
+                currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSortBy = sortBy;
+                currentSortOrder = 'desc';
+            }
+            
+            updateGroupDetailsSortIndicators();
+            currentGroupPage = 1;
+            loadGroupDetailsTable();
+        });
+    }
+    
+    function loadGroupDetailsTable() {
+        showGroupDetailsLoading();
+        
+        $.ajax({
+            url: wbcomReports.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'get_filtered_groups',
+                nonce: wbcomReports.nonce,
+                page: currentGroupPage,
+                per_page: currentGroupPerPage,
+                activity_level: currentActivityLevelFilter,
+                size_filter: currentSizeFilter,
+                performance_filter: currentPerformanceFilter,
+                sort_by: currentSortBy,
+                sort_order: currentSortOrder
+            },
+            success: function(response) {
+                if (response.success) {
+                    updateGroupDetailsTable(response.data.groups);
+                    updateGroupDetailsPagination(response.data.pagination);
+                } else {
+                    showGroupDetailsError('Failed to load group details: ' + response.data);
+                }
+            },
+            error: function(xhr, status, error) {
+                showGroupDetailsError('Error loading group details: ' + error);
+            },
+            complete: function() {
+                hideGroupDetailsLoading();
+            }
+        });
+    }
+    
+    function updateGroupDetailsTable(groups) {
+        const $tableBody = $('#group-details-table tbody');
+        $tableBody.empty();
+        
+        if (groups && groups.length > 0) {
+            groups.forEach(function(group, index) {
+                const statusClass = getGroupStatusClass(group.activity_level || 'inactive');
+                const activityLevelLabel = getActivityLevelLabel(group.activity_level || 'inactive');
+                
+                const row = `
+                    <tr class="fade-in" style="animation-delay: ${index * 0.05}s">
+                        <td>
+                            <strong>${escapeHtml(group.group_name)}</strong>
+                            <br><small class="text-muted">ID: ${group.group_id}</small>
+                        </td>
+                        <td>
+                            <span class="group-users-count font-bold">
+                                ${formatNumber(group.total_users)}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="active-users-count text-success">
+                                ${formatNumber(group.active_users_30d || 0)}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="activity-rate-badge ${getActivityRateClass(group.activity_rate)}">
+                                ${group.activity_rate}%
+                            </span>
+                        </td>
+                        <td>
+                            <span class="completion-rate-badge ${getCompletionRateClass(group.completion_rate)}">
+                                ${group.completion_rate}%
+                            </span>
+                        </td>
+                        <td>
+                            <span class="courses-count">
+                                ${formatNumber(group.associated_courses || 0)}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="status-badge ${statusClass}">
+                                ${activityLevelLabel}
+                            </span>
+                        </td>
+                        <td>
+                            <button class="button button-small view-group-details" 
+                                    data-group-id="${group.group_id}" 
+                                    data-group-name="${escapeHtml(group.group_name)}">
+                                View Details
+                            </button>
+                        </td>
+                    </tr>
+                `;
+                $tableBody.append(row);
+            });
+            
+            // Bind click events for view details buttons
+            $('.view-group-details').on('click', function() {
+                const groupId = $(this).data('group-id');
+                const groupName = $(this).data('group-name');
+                showGroupDrillDown(groupId, groupName);
+            });
+            
+        } else {
+            const noDataMessage = getNoGroupsMessage();
+            $tableBody.append(`
+                <tr>
+                    <td colspan="8" class="text-center">
+                        <div class="no-data-message">
+                            ${noDataMessage}
+                        </div>
+                    </td>
+                </tr>
+            `);
+        }
+    }
+    
+    function updateGroupDetailsPagination(pagination) {
+        if (!pagination) return;
+        
+        const { current_page, total_pages, total_groups, per_page } = pagination;
+        
+        // Update page info
+        $('#groups-page-info').text(`Page ${current_page} of ${total_pages} (${formatNumber(total_groups)} groups)`);
+        
+        // Update button states
+        $('#prev-groups-page').prop('disabled', current_page <= 1);
+        $('#next-groups-page').prop('disabled', current_page >= total_pages);
+        
+        // Update current page variable
+        currentGroupPage = current_page;
+        
+        // Show/hide pagination if needed
+        if (total_pages <= 1) {
+            $('.table-pagination').hide();
+        } else {
+            $('.table-pagination').show();
+        }
+    }
+    
+    function getActivityLevelLabel(activityLevel) {
+        const labels = {
+            'very_active': 'Very Active',
+            'active': 'Active',
+            'moderate': 'Moderate',
+            'inactive': 'Needs Attention'
+        };
+        return labels[activityLevel] || 'Unknown';
+    }
+    
+    function getActivityRateClass(rate) {
+        const numRate = parseFloat(rate);
+        if (numRate >= 70) return 'rate-excellent';
+        if (numRate >= 40) return 'rate-good';
+        if (numRate >= 20) return 'rate-average';
+        return 'rate-poor';
+    }
+    
+    function getCompletionRateClass(rate) {
+        const numRate = parseFloat(rate);
+        if (numRate >= 80) return 'completion-excellent';
+        if (numRate >= 60) return 'completion-good';
+        if (numRate >= 40) return 'completion-average';
+        return 'completion-poor';
+    }
+    
+    function getNoGroupsMessage() {
+        const activeFilters = [];
+        if (currentActivityLevelFilter !== 'all') activeFilters.push('activity level');
+        if (currentSizeFilter !== 'all') activeFilters.push('size');
+        if (currentPerformanceFilter !== 'all') activeFilters.push('performance');
+        
+        if (activeFilters.length > 0) {
+            return `
+                <p><em>No groups found matching the selected ${activeFilters.join(', ')} filter(s).</em></p>
+                <p><small>Try adjusting your filters to see more groups.</small></p>
+            `;
+        } else {
+            return `
+                <p><em>No LearnDash groups found.</em></p>
+                <p><small>Create groups in LearnDash and enroll users to see analytics here.</small></p>
+                <p><small>Use LearnDash Testing Toolkit to generate test groups for demo purposes.</small></p>
+            `;
+        }
+    }
+    
+    function updateGroupDetailsSortIndicators() {
+        // Remove all sort indicators
+        $('#group-details-table .sortable .sort-indicator').remove();
+        
+        // Add indicator to current sort column
+        const $currentHeader = $(`#group-details-table .sortable[data-sort="${currentSortBy}"]`);
+        const indicator = currentSortOrder === 'asc' ? '↑' : '↓';
+        $currentHeader.append(`<span class="sort-indicator">${indicator}</span>`);
+        
+        // Update header classes
+        $('#group-details-table .sortable').removeClass('sorted-asc sorted-desc');
+        $currentHeader.addClass(`sorted-${currentSortOrder}`);
+    }
+    
+    function showGroupDetailsLoading() {
+        $('#group-details-table tbody').html(`
+            <tr>
+                <td colspan="8" class="text-center wbcom-loading">
+                    Loading group details...
+                </td>
+            </tr>
+        `);
+        $('.table-pagination').hide();
+    }
+    
+    function hideGroupDetailsLoading() {
+        // Loading state will be replaced by updateGroupDetailsTable
+    }
+    
+    function showGroupDetailsError(message) {
+        $('#group-details-table tbody').html(`
+            <tr>
+                <td colspan="8" class="text-center">
+                    <div class="notice notice-error inline">
+                        <p>${escapeHtml(message)}</p>
+                    </div>
+                </td>
+            </tr>
+        `);
     }
     
     function checkIndexStatus() {
@@ -295,6 +570,10 @@ jQuery(document).ready(function($) {
         // Load group analytics if switching to group reports
         if (tabId === 'group-reports') {
             loadGroupAnalytics();
+            // Load the group details table after other data loads
+            setTimeout(() => {
+                loadGroupDetailsTable();
+            }, 1000);
         }
     }
     
@@ -1035,11 +1314,33 @@ jQuery(document).ready(function($) {
     function loadFilteredGroups() {
         // Implementation for loading filtered groups with pagination
         // This would call a new AJAX endpoint to get filtered group data
+        loadGroupDetailsTable();
     }
     
     function exportGroupInsights() {
-        // Implementation for exporting group insights
-        // This would trigger CSV download of current group analytics
+        const $button = $('#export-group-insights');
+        $button.prop('disabled', true).text('Exporting...');
+        
+        const form = $('<form>', {
+            method: 'POST',
+            action: wbcomReports.ajaxurl
+        });
+        
+        form.append($('<input>', { type: 'hidden', name: 'action', value: 'export_group_insights' }));
+        form.append($('<input>', { type: 'hidden', name: 'nonce', value: wbcomReports.nonce }));
+        form.append($('<input>', { type: 'hidden', name: 'activity_level', value: currentActivityLevelFilter }));
+        form.append($('<input>', { type: 'hidden', name: 'size_filter', value: currentSizeFilter }));
+        form.append($('<input>', { type: 'hidden', name: 'performance_filter', value: currentPerformanceFilter }));
+        
+        $('body').append(form);
+        form.submit();
+        form.remove();
+        
+        setTimeout(function() {
+            $button.prop('disabled', false).text('Export Insights');
+        }, 2000);
+        
+        showSuccessMessage('Export started! Your download should begin shortly.');
     }
     
     function createCourseCompletionChart(data) {
@@ -1619,6 +1920,98 @@ jQuery(document).ready(function($) {
                     width: 100%;
                 }
                 
+                /* Group Details Table Styles */
+                .rate-excellent, .completion-excellent { 
+                    background: #46b450; 
+                    color: white; 
+                    padding: 2px 6px; 
+                    border-radius: 3px; 
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+                .rate-good, .completion-good { 
+                    background: #00a32a; 
+                    color: white; 
+                    padding: 2px 6px; 
+                    border-radius: 3px; 
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+                .rate-average, .completion-average { 
+                    background: #ffb900; 
+                    color: white; 
+                    padding: 2px 6px; 
+                    border-radius: 3px; 
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+                .rate-poor, .completion-poor { 
+                    background: #dc3232; 
+                    color: white; 
+                    padding: 2px 6px; 
+                    border-radius: 3px; 
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+                
+                .group-users-count { 
+                    font-size: 16px; 
+                    color: #0073aa; 
+                }
+                
+                .button-small {
+                    padding: 4px 8px;
+                    font-size: 11px;
+                    height: auto;
+                    line-height: 1.2;
+                }
+                
+                .activity-rate-badge,
+                .completion-rate-badge {
+                    display: inline-block;
+                    min-width: 40px;
+                    text-align: center;
+                }
+                
+                /* Table sortable headers for group details */
+                #group-details-table .sortable {
+                    cursor: pointer;
+                    user-select: none;
+                    position: relative;
+                    transition: background-color 0.2s ease;
+                }
+                
+                #group-details-table .sortable:hover {
+                    background-color: #f0f0f0;
+                }
+                
+                #group-details-table .sort-indicator {
+                    margin-left: 5px;
+                    font-weight: bold;
+                    color: #0073aa;
+                }
+                
+                #group-details-table .sortable.sorted-asc,
+                #group-details-table .sortable.sorted-desc {
+                    background-color: #f8f9fa;
+                }
+                
+                /* Fade in animation for table rows */
+                .fade-in {
+                    animation: fadeInUp 0.5s ease-out forwards;
+                }
+                
+                @keyframes fadeInUp {
+                    from {
+                        opacity: 0;
+                        transform: translateY(20px);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0);
+                    }
+                }
+                
                 /* Mobile Responsiveness */
                 @media (max-width: 768px) {
                     .search-controls {
@@ -1641,6 +2034,61 @@ jQuery(document).ready(function($) {
                     .chart-container {
                         height: 250px;
                         max-height: 250px;
+                    }
+                    
+                    /* Make group details table responsive */
+                    #group-details-table {
+                        font-size: 12px;
+                    }
+                    
+                    #group-details-table th,
+                    #group-details-table td {
+                        padding: 6px 4px;
+                    }
+                    
+                    .button-small {
+                        padding: 2px 4px;
+                        font-size: 10px;
+                    }
+                    
+                    .rate-excellent, .completion-excellent,
+                    .rate-good, .completion-good,
+                    .rate-average, .completion-average,
+                    .rate-poor, .completion-poor {
+                        padding: 1px 3px;
+                        font-size: 9px;
+                    }
+                }
+                
+                @media (max-width: 480px) {
+                    .group-quick-stats {
+                        grid-template-columns: 1fr;
+                    }
+                    
+                    .filter-controls {
+                        flex-direction: column;
+                        align-items: stretch;
+                    }
+                    
+                    .filter-controls select {
+                        min-width: 100%;
+                        margin-bottom: 5px;
+                    }
+                    
+                    .table-pagination {
+                        flex-direction: column;
+                        text-align: center;
+                        gap: 10px;
+                    }
+                    
+                    .table-pagination button {
+                        width: 100%;
+                        max-width: 120px;
+                    }
+                    
+                    #groups-per-page {
+                        width: 100%;
+                        max-width: 200px;
                     }
                 }
             </style>
