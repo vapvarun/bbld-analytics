@@ -43,6 +43,11 @@ class Wbcom_Reports_LearnDash {
         
         // Initialize group index table
         add_action('init', array($this, 'maybe_create_group_index_table'));
+        
+        global $wpdb;
+        $this->group_index_table = $wpdb->prefix . 'wbcom_learndash_group_index';
+
+        add_action('wp_ajax_export_group_insights', array($this, 'ajax_export_group_insights'));
     }
     
     /**
@@ -941,20 +946,6 @@ class Wbcom_Reports_LearnDash {
     }
     
     /**
-     * Maybe rebuild group index
-     */
-    private function maybe_rebuild_group_index() {
-        global $wpdb;
-        
-        // Check if index table has data
-        $count = $wpdb->get_var("SELECT COUNT(*) FROM {$this->group_index_table}");
-        
-        if ($count == 0) {
-            $this->rebuild_group_index();
-        }
-    }
-    
-    /**
      * Rebuild group index
      */
     private function rebuild_group_index() {
@@ -1087,17 +1078,6 @@ class Wbcom_Reports_LearnDash {
         if ($combined_score >= 60) return 'good';
         if ($combined_score >= 40) return 'average';
         return 'low';
-    }
-    
-    /**
-     * Calculate engagement score
-     */
-    private function calculate_engagement_score($activity_status, $completion_data) {
-        // Simple engagement score based on activity and completion
-        $activity_score = $activity_status['activity_rate'];
-        $completion_score = $completion_data['completion_rate'];
-        
-        return round(($activity_score * 0.5) + ($completion_score * 0.5), 2);
     }
     
     /**
@@ -1691,6 +1671,573 @@ class Wbcom_Reports_LearnDash {
         $this->index->index_user($user_id);
         wp_cache_delete('active_learners', $this->cache_group);
         wp_cache_delete('course_analytics', $this->cache_group);
+    }
+    
+    /**
+     * AJAX handler for filtered groups
+     */
+    public function ajax_get_filtered_groups() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized access');
+        }
+        
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wbcom_reports_nonce')) {
+            wp_send_json_error('Security check failed');
+        }
+        
+        try {
+            $page = isset($_POST['page']) ? intval($_POST['page']) : 1;
+            $per_page = isset($_POST['per_page']) ? intval($_POST['per_page']) : 25;
+            $activity_level = isset($_POST['activity_level']) ? sanitize_text_field($_POST['activity_level']) : 'all';
+            $size_filter = isset($_POST['size_filter']) ? sanitize_text_field($_POST['size_filter']) : 'all';
+            $performance_filter = isset($_POST['performance_filter']) ? sanitize_text_field($_POST['performance_filter']) : 'all';
+            
+            $filtered_groups = $this->get_filtered_groups_data($page, $per_page, $activity_level, $size_filter, $performance_filter);
+            
+            wp_send_json_success($filtered_groups);
+            
+        } catch (Exception $e) {
+            error_log('Filtered Groups Error: ' . $e->getMessage());
+            wp_send_json_error('Error loading filtered groups: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Get filtered groups data
+     */
+    private function get_filtered_groups_data($page = 1, $per_page = 25, $activity_level = 'all', $size_filter = 'all', $performance_filter = 'all') {
+        global $wpdb;
+        
+        // Ensure group index exists
+        $this->maybe_rebuild_group_index();
+        
+        // Build WHERE clause
+        $where_conditions = array('1=1');
+        
+        if ($activity_level !== 'all') {
+            $where_conditions[] = $wpdb->prepare('activity_level = %s', $activity_level);
+        }
+        
+        if ($size_filter !== 'all') {
+            switch ($size_filter) {
+                case 'large':
+                    $where_conditions[] = 'total_users >= 100';
+                    break;
+                case 'medium':
+                    $where_conditions[] = 'total_users BETWEEN 25 AND 99';
+                    break;
+                case 'small':
+                    $where_conditions[] = 'total_users BETWEEN 1 AND 24';
+                    break;
+            }
+        }
+        
+        if ($performance_filter !== 'all') {
+            switch ($performance_filter) {
+                case 'high':
+                    $where_conditions[] = 'completion_rate >= 80';
+                    break;
+                case 'good':
+                    $where_conditions[] = 'completion_rate BETWEEN 60 AND 79.99';
+                    break;
+                case 'average':
+                    $where_conditions[] = 'completion_rate BETWEEN 40 AND 59.99';
+                    break;
+                case 'low':
+                    $where_conditions[] = 'completion_rate < 40';
+                    break;
+            }
+        }
+        
+        $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
+        
+        // Calculate pagination
+        $offset = ($page - 1) * $per_page;
+        $limit = $per_page > 0 ? "LIMIT {$offset}, {$per_page}" : "";
+        
+        // Get filtered groups
+        $groups = $wpdb->get_results("
+            SELECT *,
+                   CASE 
+                       WHEN activity_level = 'very_active' THEN 'Very Active'
+                       WHEN activity_level = 'active' THEN 'Active'
+                       WHEN activity_level = 'moderate' THEN 'Moderate'
+                       WHEN activity_level = 'inactive' THEN 'Needs Attention'
+                       ELSE 'Unknown'
+                   END as status
+            FROM {$this->group_index_table}
+            {$where_clause}
+            ORDER BY total_users DESC, completion_rate DESC
+            {$limit}
+        ");
+        
+        // Get total count for pagination
+        $total_count = $wpdb->get_var("
+            SELECT COUNT(*)
+            FROM {$this->group_index_table}
+            {$where_clause}
+        ");
+        
+        $total_pages = $per_page > 0 ? ceil($total_count / $per_page) : 1;
+        
+        return array(
+            'groups' => $groups,
+            'pagination' => array(
+                'current_page' => $page,
+                'total_pages' => $total_pages,
+                'total_groups' => intval($total_count),
+                'per_page' => $per_page
+            )
+        );
+    }
+
+    /**
+     * AJAX handler for group drill-down
+     */
+    public function ajax_get_group_drilldown() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized access');
+        }
+        
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wbcom_reports_nonce')) {
+            wp_send_json_error('Security check failed');
+        }
+        
+        $group_id = isset($_POST['group_id']) ? intval($_POST['group_id']) : 0;
+        
+        if (!$group_id) {
+            wp_send_json_error('Invalid group ID');
+        }
+        
+        try {
+            $group_details = $this->get_group_drilldown_data($group_id);
+            wp_send_json_success($group_details);
+            
+        } catch (Exception $e) {
+            error_log('Group Drilldown Error: ' . $e->getMessage());
+            wp_send_json_error('Error loading group details: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Get group drill-down data
+     */
+    private function get_group_drilldown_data($group_id) {
+        global $wpdb;
+        
+        // Get group data from index
+        $group_data = $wpdb->get_row($wpdb->prepare("
+            SELECT * FROM {$this->group_index_table} WHERE group_id = %d
+        ", $group_id));
+        
+        if (!$group_data) {
+            throw new Exception('Group not found in index');
+        }
+        
+        // Get additional details
+        $group_leaders = $this->get_group_leaders($group_id);
+        $recent_activity = $this->get_group_recent_activity($group_id);
+        $top_learners = $this->get_group_top_learners($group_id);
+        
+        return array(
+            'group_id' => $group_id,
+            'total_users' => $group_data->total_users,
+            'active_users' => $group_data->active_users_30d,
+            'completion_rate' => $group_data->completion_rate . '%',
+            'activity_level' => $group_data->activity_level,
+            'activity_rate' => $group_data->activity_rate . '%',
+            'engagement_score' => isset($group_data->engagement_score) ? $group_data->engagement_score : 0,
+            'associated_courses' => $group_data->associated_courses,
+            'leaders' => $group_leaders,
+            'recent_activity' => $recent_activity,
+            'top_learners' => $top_learners
+        );
+    }
+
+    /**
+     * Get group leaders
+     */
+    private function get_group_leaders($group_id) {
+        if (!function_exists('learndash_get_groups_administrator_ids')) {
+            return array();
+        }
+        
+        $leader_ids = learndash_get_groups_administrator_ids($group_id);
+        $leaders = array();
+        
+        if (is_array($leader_ids)) {
+            foreach ($leader_ids as $leader_id) {
+                $user = get_user_by('ID', $leader_id);
+                if ($user) {
+                    $leaders[] = array(
+                        'id' => $leader_id,
+                        'name' => $user->display_name,
+                        'email' => $user->user_email
+                    );
+                }
+            }
+        }
+        
+        return $leaders;
+    }
+
+    /**
+     * Get group recent activity
+     */
+    private function get_group_recent_activity($group_id, $limit = 10) {
+        global $wpdb;
+        
+        // Get group members first
+        $group_users = $wpdb->get_col($wpdb->prepare("
+            SELECT user_id FROM {$wpdb->usermeta} 
+            WHERE meta_key = %s AND meta_value = %s
+        ", 'learndash_group_users_' . $group_id, $group_id));
+        
+        if (empty($group_users)) {
+            return array();
+        }
+        
+        $user_ids_placeholder = implode(',', array_fill(0, count($group_users), '%d'));
+        
+        // Get recent learning activity for group members
+        $recent_activity = $wpdb->get_results($wpdb->prepare("
+            SELECT ua.user_id, ua.activity_type, ua.post_id, ua.activity_updated, u.display_name,
+                CASE 
+                    WHEN ua.activity_type = 'course' THEN 'Course Activity'
+                    WHEN ua.activity_type = 'lesson' THEN 'Lesson Completed'
+                    WHEN ua.activity_type = 'topic' THEN 'Topic Completed'
+                    WHEN ua.activity_type = 'quiz' THEN 'Quiz Taken'
+                    ELSE 'Learning Activity'
+                END as activity_label
+            FROM {$wpdb->prefix}learndash_user_activity ua
+            INNER JOIN {$wpdb->users} u ON ua.user_id = u.ID
+            WHERE ua.user_id IN ({$user_ids_placeholder})
+            AND ua.activity_updated >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            ORDER BY ua.activity_updated DESC
+            LIMIT %d
+        ", array_merge($group_users, array($limit))));
+        
+        return $recent_activity;
+    }
+
+    /**
+     * Get group top learners
+     */
+    private function get_group_top_learners($group_id, $limit = 5) {
+        global $wpdb;
+        
+        // Get group members first
+        $group_users = $wpdb->get_col($wpdb->prepare("
+            SELECT user_id FROM {$wpdb->usermeta} 
+            WHERE meta_key = %s AND meta_value = %s
+        ", 'learndash_group_users_' . $group_id, $group_id));
+        
+        if (empty($group_users)) {
+            return array();
+        }
+        
+        $user_ids_placeholder = implode(',', array_fill(0, count($group_users), '%d'));
+        
+        // Get top learners from the group
+        $top_learners = $wpdb->get_results($wpdb->prepare("
+            SELECT u.ID, u.display_name, 
+                COUNT(DISTINCT pm1.meta_value) as enrolled_courses,
+                COUNT(DISTINCT pm2.meta_value) as completed_courses,
+                ROUND(AVG(CASE WHEN pm3.meta_value != '' THEN pm3.meta_value ELSE 0 END), 1) as avg_progress
+            FROM {$wpdb->users} u
+            LEFT JOIN {$wpdb->postmeta} pm1 ON FIND_IN_SET(u.ID, pm1.meta_value) AND pm1.meta_key = 'course_access_list'
+            LEFT JOIN {$wpdb->usermeta} pm2 ON u.ID = pm2.user_id AND pm2.meta_key LIKE 'course_completed_%'
+            LEFT JOIN {$wpdb->usermeta} pm3 ON u.ID = pm3.user_id AND pm3.meta_key LIKE 'course_%_progress'
+            WHERE u.ID IN ({$user_ids_placeholder})
+            GROUP BY u.ID, u.display_name
+            HAVING enrolled_courses > 0
+            ORDER BY completed_courses DESC, avg_progress DESC
+            LIMIT %d
+        ", array_merge($group_users, array($limit))));
+        
+        return $top_learners;
+    }
+
+    /**
+     * AJAX handler for exporting group insights
+     */
+    public function ajax_export_group_insights() {
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+        
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wbcom_reports_nonce')) {
+            wp_die('Security check failed');
+        }
+        
+        $activity_level = isset($_POST['activity_level']) ? sanitize_text_field($_POST['activity_level']) : 'all';
+        $size_filter = isset($_POST['size_filter']) ? sanitize_text_field($_POST['size_filter']) : 'all';
+        $performance_filter = isset($_POST['performance_filter']) ? sanitize_text_field($_POST['performance_filter']) : 'all';
+        
+        // Get all groups (no pagination limit)
+        $filtered_data = $this->get_filtered_groups_data(1, 0, $activity_level, $size_filter, $performance_filter);
+        
+        $export_data = array();
+        foreach ($filtered_data['groups'] as $group) {
+            $export_data[] = array(
+                'Group Name' => $group->group_name,
+                'Group ID' => $group->group_id,
+                'Total Users' => $group->total_users,
+                'Active Users (30d)' => $group->active_users_30d,
+                'Activity Rate' => $group->activity_rate . '%',
+                'Activity Level' => $group->activity_level,
+                'Completion Rate' => $group->completion_rate . '%',
+                'Performance Tier' => isset($group->performance_tier) ? $group->performance_tier : 'N/A',
+                'Associated Courses' => $group->associated_courses,
+                'Engagement Score' => isset($group->engagement_score) ? $group->engagement_score : 'N/A',
+                'Group Size Category' => isset($group->group_size_category) ? $group->group_size_category : $this->get_size_category($group->total_users),
+                'Created Date' => isset($group->created_date) ? $group->created_date : 'N/A',
+                'Last Activity' => isset($group->last_activity) ? $group->last_activity : 'Never',
+                'Leader Count' => isset($group->leader_count) ? $group->leader_count : 0
+            );
+        }
+        
+        $filename = 'learndash-group-insights-' . date('Y-m-d-H-i-s') . '.csv';
+        $this->export_to_csv($export_data, $filename);
+    }
+
+    /**
+     * Get size category for a group
+     */
+    private function get_size_category($total_users) {
+        if ($total_users >= 100) {
+            return 'Large';
+        } elseif ($total_users >= 25) {
+            return 'Medium';
+        } elseif ($total_users >= 1) {
+            return 'Small';
+        } else {
+            return 'Empty';
+        }
+    }
+
+    /**
+     * Export data to CSV
+     */
+    private function export_to_csv($data, $filename) {
+        if (empty($data)) {
+            wp_die('No data to export');
+        }
+        
+        // Set headers for CSV download
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+        
+        // Create output stream
+        $output = fopen('php://output', 'w');
+        
+        // Add BOM for UTF-8
+        fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+        
+        // Write CSV headers
+        if (!empty($data)) {
+            fputcsv($output, array_keys($data[0]));
+            
+            // Write data rows
+            foreach ($data as $row) {
+                fputcsv($output, $row);
+            }
+        }
+        
+        fclose($output);
+        exit;
+    }
+
+    /**
+     * Maybe rebuild group index table
+     */
+    private function maybe_rebuild_group_index() {
+        global $wpdb;
+        
+        // Check if table exists
+        $table_exists = $wpdb->get_var("SHOW TABLES LIKE '{$this->group_index_table}'");
+        
+        if (!$table_exists) {
+            $this->create_group_index_table();
+            $this->populate_group_index();
+        }
+        
+        // Check if data is recent (less than 1 hour old)
+        $last_update = get_option('wbcom_group_index_last_update', 0);
+        if (time() - $last_update > 3600) { // 1 hour
+            $this->populate_group_index();
+            update_option('wbcom_group_index_last_update', time());
+        }
+    }
+
+    /**
+     * Create group index table
+     */
+    private function create_group_index_table() {
+        global $wpdb;
+        
+        $charset_collate = $wpdb->get_charset_collate();
+        
+        $sql = "CREATE TABLE {$this->group_index_table} (
+            id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            group_id bigint(20) unsigned NOT NULL,
+            group_name varchar(255) NOT NULL,
+            total_users int(11) DEFAULT 0,
+            active_users_30d int(11) DEFAULT 0,
+            activity_rate decimal(5,2) DEFAULT 0.00,
+            activity_level varchar(20) DEFAULT 'inactive',
+            completion_rate decimal(5,2) DEFAULT 0.00,
+            associated_courses int(11) DEFAULT 0,
+            engagement_score decimal(5,2) DEFAULT 0.00,
+            created_date datetime DEFAULT CURRENT_TIMESTAMP,
+            last_activity datetime NULL,
+            leader_count int(11) DEFAULT 0,
+            group_size_category varchar(20) DEFAULT 'small',
+            performance_tier varchar(20) DEFAULT 'low',
+            updated_at timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY group_id (group_id),
+            KEY activity_level (activity_level),
+            KEY completion_rate (completion_rate),
+            KEY total_users (total_users)
+        ) $charset_collate;";
+        
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+        dbDelta($sql);
+    }
+
+    /**
+     * Populate group index with current data
+     */
+    private function populate_group_index() {
+        global $wpdb;
+        
+        // Get all LearnDash groups
+        $groups = get_posts(array(
+            'post_type' => 'groups',
+            'post_status' => 'publish',
+            'numberposts' => -1,
+            'fields' => 'ids'
+        ));
+        
+        foreach ($groups as $group_id) {
+            $this->update_group_index_data($group_id);
+        }
+    }
+
+    /**
+     * Update group index data for a specific group
+     */
+    private function update_group_index_data($group_id) {
+        global $wpdb;
+        
+        $group_name = get_the_title($group_id);
+        $group_users = learndash_get_groups_user_ids($group_id);
+        $total_users = is_array($group_users) ? count($group_users) : 0;
+        
+        // Calculate metrics
+        $active_users_30d = $this->get_active_users_count($group_users, 30);
+        $activity_rate = $total_users > 0 ? round(($active_users_30d / $total_users) * 100, 2) : 0;
+        $completion_rate = $this->calculate_group_completion_rate($group_users);
+        $associated_courses = $this->get_group_courses_count($group_id);
+        $engagement_score = $this->calculate_engagement_score($activity_rate, $completion_rate);
+        
+        // Determine activity level
+        $activity_level = $this->determine_activity_level($activity_rate);
+        
+        // Determine size category
+        $size_category = $this->get_size_category($total_users);
+        
+        // Determine performance tier
+        $performance_tier = $this->determine_performance_tier($completion_rate);
+        
+        // Get leader count
+        $leader_count = is_array(learndash_get_groups_administrator_ids($group_id)) ? 
+                       count(learndash_get_groups_administrator_ids($group_id)) : 0;
+        
+        // Insert or update the record
+        $wpdb->replace(
+            $this->group_index_table,
+            array(
+                'group_id' => $group_id,
+                'group_name' => $group_name,
+                'total_users' => $total_users,
+                'active_users_30d' => $active_users_30d,
+                'activity_rate' => $activity_rate,
+                'activity_level' => $activity_level,
+                'completion_rate' => $completion_rate,
+                'associated_courses' => $associated_courses,
+                'engagement_score' => $engagement_score,
+                'leader_count' => $leader_count,
+                'group_size_category' => $size_category,
+                'performance_tier' => $performance_tier,
+                'updated_at' => current_time('mysql')
+            ),
+            array('%d', '%s', '%d', '%d', '%f', '%s', '%f', '%d', '%f', '%d', '%s', '%s', '%s')
+        );
+    }
+
+    /**
+     * Helper methods for calculations
+     */
+    private function get_active_users_count($user_ids, $days = 30) {
+        if (empty($user_ids)) return 0;
+        
+        global $wpdb;
+        $user_ids_str = implode(',', array_map('intval', $user_ids));
+        
+        return $wpdb->get_var("
+            SELECT COUNT(DISTINCT user_id) 
+            FROM {$wpdb->prefix}learndash_user_activity 
+            WHERE user_id IN ({$user_ids_str}) 
+            AND activity_updated >= DATE_SUB(NOW(), INTERVAL {$days} DAY)
+        ");
+    }
+
+    private function calculate_group_completion_rate($user_ids) {
+        if (empty($user_ids)) return 0;
+        
+        global $wpdb;
+        $total_enrollments = 0;
+        $total_completions = 0;
+        
+        foreach ($user_ids as $user_id) {
+            $user_courses = learndash_user_get_enrolled_courses($user_id);
+            $total_enrollments += count($user_courses);
+            
+            foreach ($user_courses as $course_id) {
+                if (learndash_course_completed($user_id, $course_id)) {
+                    $total_completions++;
+                }
+            }
+        }
+        
+        return $total_enrollments > 0 ? round(($total_completions / $total_enrollments) * 100, 2) : 0;
+    }
+
+    private function get_group_courses_count($group_id) {
+        $courses = learndash_group_enrolled_courses($group_id);
+        return is_array($courses) ? count($courses) : 0;
+    }
+
+    private function calculate_engagement_score($activity_rate, $completion_rate) {
+        return round(($activity_rate * 0.6) + ($completion_rate * 0.4), 2);
+    }
+
+    private function determine_activity_level($activity_rate) {
+        if ($activity_rate >= 80) return 'very_active';
+        if ($activity_rate >= 60) return 'active';
+        if ($activity_rate >= 30) return 'moderate';
+        return 'inactive';
+    }
+
+    private function determine_performance_tier($completion_rate) {
+        if ($completion_rate >= 80) return 'high';
+        if ($completion_rate >= 60) return 'good';
+        if ($completion_rate >= 40) return 'average';
+        return 'low';
     }
 }
 
