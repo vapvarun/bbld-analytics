@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Wbcom Activity & Learning Reports
- * Description: Comprehensive reporting widget for BuddyPress activity and LearnDash learning metrics with search and sorting capabilities
- * Version: 1.1
+ * Description: Comprehensive reporting widget for BuddyPress activity and LearnDash learning metrics with advanced group analytics and search capabilities
+ * Version: 1.2
  * Author: vapvarun
  * Author URI: https://wbcomdesigns.com
  * Company: Wbcom Designs
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 // Define plugin constants
 define('WBCOM_REPORTS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WBCOM_REPORTS_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('WBCOM_REPORTS_VERSION', '1.1');
+define('WBCOM_REPORTS_VERSION', '1.2');
 
 class Wbcom_Reports_Main {
     
@@ -116,20 +116,30 @@ class Wbcom_Reports_Main {
         
         // Page-specific scripts
         if ($hook === 'toplevel_page_wbcom-reports') {
-            wp_enqueue_script('wbcom-dashboard', WBCOM_REPORTS_PLUGIN_URL . 'assets/dashboard.js', array('jquery'), WBCOM_REPORTS_VERSION, true);
+            wp_enqueue_script('wbcom-dashboard', WBCOM_REPORTS_PLUGIN_URL . 'assets/dashboard.js', array('jquery', 'chart-js'), WBCOM_REPORTS_VERSION, true);
         } elseif ($hook === 'wbcom-reports_page_wbcom-buddypress-reports') {
-            // Use the new indexed version for BuddyPress reports
+            // Use the indexed version for BuddyPress reports
             wp_enqueue_script('wbcom-buddypress-indexed', WBCOM_REPORTS_PLUGIN_URL . 'assets/buddypress-indexed.js', array('jquery'), WBCOM_REPORTS_VERSION, true);
         } elseif ($hook === 'wbcom-reports_page_wbcom-learndash-reports') {
-            // Use the enhanced indexed version for LearnDash reports too
-            wp_enqueue_script('wbcom-learndash-indexed', WBCOM_REPORTS_PLUGIN_URL . 'assets/learndash-indexed.js', array('jquery'), WBCOM_REPORTS_VERSION, true);
+            // Use the enhanced indexed version for LearnDash reports with advanced group analytics
+            wp_enqueue_script('wbcom-learndash-indexed', WBCOM_REPORTS_PLUGIN_URL . 'assets/learndash-indexed.js', array('jquery', 'chart-js'), WBCOM_REPORTS_VERSION, true);
         }
         
         // Localize script with admin URL support
-        wp_localize_script('jquery', 'wbcomReports', array(
+        $localize_handle = 'jquery';
+        if ($hook === 'toplevel_page_wbcom-reports') {
+            $localize_handle = 'wbcom-dashboard';
+        } elseif ($hook === 'wbcom-reports_page_wbcom-buddypress-reports') {
+            $localize_handle = 'wbcom-buddypress-indexed';
+        } elseif ($hook === 'wbcom-reports_page_wbcom-learndash-reports') {
+            $localize_handle = 'wbcom-learndash-indexed';
+        }
+        
+        wp_localize_script($localize_handle, 'wbcomReports', array(
             'ajaxurl' => admin_url('admin-ajax.php'),
             'adminUrl' => admin_url(),
-            'nonce' => wp_create_nonce('wbcom_reports_nonce')
+            'nonce' => wp_create_nonce('wbcom_reports_nonce'),
+            'pluginUrl' => WBCOM_REPORTS_PLUGIN_URL
         ));
     }
     
@@ -186,6 +196,10 @@ class Wbcom_Reports_Main {
                     $wpdb->query("CREATE INDEX IF NOT EXISTS idx_ld_user_activity_type ON {$ld_activity_table} (activity_type)");
                     $wpdb->query("CREATE INDEX IF NOT EXISTS idx_ld_user_activity_updated ON {$ld_activity_table} (activity_updated)");
                 }
+                
+                // Index for LearnDash groups
+                $ld_groups_table = $wpdb->prefix . 'posts';
+                $wpdb->query("CREATE INDEX IF NOT EXISTS idx_posts_type_status ON {$ld_groups_table} (post_type, post_status)");
             }
             
             // Index for user meta to improve query performance

@@ -1,5 +1,5 @@
 /**
- * Enhanced LearnDash Reports JavaScript with Indexing Support
+ * Enhanced LearnDash Reports JavaScript with Indexing Support and Advanced Group Analytics
  * 
  * @package Wbcom_Reports
  */
@@ -16,6 +16,13 @@ jQuery(document).ready(function($) {
     let currentSortOrder = 'desc';
     let completionChart = null;
     let isIndexing = false;
+    
+    // Group analytics state
+    let currentGroupPage = 1;
+    let currentGroupPerPage = 25;
+    let currentActivityLevelFilter = 'all';
+    let currentSizeFilter = 'all';
+    let currentPerformanceFilter = 'all';
     
     // Initialize LearnDash reports
     initLearnDashReports();
@@ -79,18 +86,13 @@ jQuery(document).ready(function($) {
             const sortBy = $(this).data('sort');
             
             if (currentSortBy === sortBy) {
-                // Toggle sort order
                 currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
             } else {
-                // New sort column
                 currentSortBy = sortBy;
                 currentSortOrder = 'desc';
             }
             
-            // Update UI indicators
             updateSortIndicators();
-            
-            // Reload data
             loadLearnDashStats();
         });
         
@@ -111,10 +113,43 @@ jQuery(document).ready(function($) {
         $('#apply-group-filters').on('click', function() {
             applyGroupFilters();
         });
+        
+        // Enhanced group analytics filters
+        $('#activity-level-filter, #size-filter, #performance-filter').on('change', function() {
+            currentActivityLevelFilter = $('#activity-level-filter').val();
+            currentSizeFilter = $('#size-filter').val();
+            currentPerformanceFilter = $('#performance-filter').val();
+        });
+        
+        $('#apply-group-filters').on('click', function() {
+            loadFilteredGroups();
+        });
+        
+        $('#export-group-insights').on('click', function() {
+            exportGroupInsights();
+        });
+        
+        // Group table pagination
+        $('#prev-groups-page').on('click', function() {
+            if (currentGroupPage > 1) {
+                currentGroupPage--;
+                loadFilteredGroups();
+            }
+        });
+        
+        $('#next-groups-page').on('click', function() {
+            currentGroupPage++;
+            loadFilteredGroups();
+        });
+        
+        $('#groups-per-page').on('change', function() {
+            currentGroupPerPage = parseInt($(this).val());
+            currentGroupPage = 1;
+            loadFilteredGroups();
+        });
     }
     
     function checkIndexStatus() {
-        // Check if index needs rebuilding based on UI indicators
         const $rebuildButton = $('#rebuild-ld-index');
         if ($rebuildButton.hasClass('needs-rebuild')) {
             showIndexWarning();
@@ -151,7 +186,6 @@ jQuery(document).ready(function($) {
         isIndexing = true;
         $button.prop('disabled', true).text('Rebuilding Learning Index...');
         
-        // Show progress indicator
         showIndexProgress();
         
         $.ajax({
@@ -165,16 +199,10 @@ jQuery(document).ready(function($) {
                 if (response.success) {
                     showSuccessMessage(response.data.message);
                     
-                    // Update index status display
                     updateIndexStatus(response.data.indexed_count);
-                    
-                    // Remove warning if present
                     $('.index-warning').fadeOut();
-                    
-                    // Change button styling back to normal
                     $button.removeClass('needs-rebuild');
                     
-                    // Refresh the data to show improved performance
                     setTimeout(() => {
                         loadLearnDashStats();
                     }, 1000);
@@ -206,7 +234,6 @@ jQuery(document).ready(function($) {
         
         $('.wbcom-stats-actions').after(progressHtml);
         
-        // Animate progress bar
         let progress = 0;
         const interval = setInterval(() => {
             progress += Math.random() * 10;
@@ -215,7 +242,6 @@ jQuery(document).ready(function($) {
             $('#ld-index-progress .progress-fill').css('width', progress + '%');
         }, 500);
         
-        // Store interval for cleanup
         $('#ld-index-progress').data('interval', interval);
     }
     
@@ -227,7 +253,6 @@ jQuery(document).ready(function($) {
             clearInterval(interval);
         }
         
-        // Complete the progress bar
         $progress.find('.progress-fill').css('width', '100%');
         
         setTimeout(() => {
@@ -245,24 +270,19 @@ jQuery(document).ready(function($) {
     }
     
     function initTabs() {
-        // Set initial active tab
         switchTab('user-progress');
         updateSortIndicators();
     }
     
     function switchTab(tabId) {
-        // Update tab buttons
         $('.tab-button').removeClass('active');
         $(`.tab-button[data-tab="${tabId}"]`).addClass('active');
         
-        // Update tab content
         $('.tab-content').removeClass('active');
         $(`#${tabId}`).addClass('active');
         
-        // Update current tab
         currentTab = tabId;
         
-        // Show/hide search controls based on tab
         if (tabId === 'user-progress') {
             $('.search-controls').show();
             updateSortIndicators();
@@ -270,22 +290,23 @@ jQuery(document).ready(function($) {
             $('.search-controls').hide();
         }
         
-        // Load data for the new tab
         loadLearnDashStats();
+        
+        // Load group analytics if switching to group reports
+        if (tabId === 'group-reports') {
+            loadGroupAnalytics();
+        }
     }
     
     function updateSortIndicators() {
         if (currentTab !== 'user-progress') return;
         
-        // Remove all sort indicators
         $('.sortable-header .sort-indicator').remove();
         
-        // Add indicator to current sort column
         const $currentHeader = $(`.sortable-header[data-sort="${currentSortBy}"]`);
         const indicator = currentSortOrder === 'asc' ? '↑' : '↓';
         $currentHeader.append(`<span class="sort-indicator">${indicator}</span>`);
         
-        // Update header classes
         $('.sortable-header').removeClass('sorted-asc sorted-desc');
         $currentHeader.addClass(`sorted-${currentSortOrder}`);
     }
@@ -310,12 +331,10 @@ jQuery(document).ready(function($) {
                 if (response.success) {
                     updateLearnDashDisplay(response.data);
                     
-                    // Show performance indicator if using indexed data
                     if (response.data.using_index) {
                         showPerformanceIndicator();
                     }
                 } else {
-                    // Handle LearnDash not active error gracefully
                     if (response.data && response.data.includes('LearnDash not active')) {
                         showLearnDashNotActiveMessage();
                     } else {
@@ -342,7 +361,6 @@ jQuery(document).ready(function($) {
             `;
             $('.wbcom-stats-actions').append(indicatorHtml);
             
-            // Auto-hide after 3 seconds
             setTimeout(() => {
                 $('.performance-indicator').fadeOut();
             }, 3000);
@@ -350,16 +368,13 @@ jQuery(document).ready(function($) {
     }
     
     function updateLearnDashDisplay(data) {
-        // Update stat boxes with null safety
         updateStatBox('#total-courses', data.total_courses || 0);
         updateStatBox('#total-lessons', data.total_lessons || 0);
         updateStatBox('#active-learners', data.active_learners || 0);
         updateStatBox('#completed-courses', data.completed_courses || 0);
         
-        // Update course filter dropdown
         updateCourseFilter(data.courses_list || []);
         
-        // Update content based on active tab
         switch (currentTab) {
             case 'user-progress':
                 updateUserProgressTable(data.user_stats || []);
@@ -386,7 +401,6 @@ jQuery(document).ready(function($) {
             });
         }
         
-        // Restore previous selection if it still exists
         if (currentValue && $courseFilter.find(`option[value="${currentValue}"]`).length) {
             $courseFilter.val(currentValue);
         }
@@ -487,7 +501,6 @@ jQuery(document).ready(function($) {
     }
     
     function updateCourseAnalytics(courseAnalytics) {
-        // Update course analytics table
         const $tableBody = $('#course-analytics-table tbody');
         $tableBody.empty();
         
@@ -519,7 +532,6 @@ jQuery(document).ready(function($) {
                 $tableBody.append(row);
             });
             
-            // Create course completion chart
             createCourseCompletionChart(courseAnalytics);
             
         } else {
@@ -538,7 +550,6 @@ jQuery(document).ready(function($) {
     }
     
     function updateGroupAnalytics(groupAnalytics) {
-        // Update group analytics table
         const $tableBody = $('#group-analytics-table tbody');
         $tableBody.empty();
         
@@ -587,7 +598,6 @@ jQuery(document).ready(function($) {
                 $tableBody.append(row);
             });
             
-            // Create group enrollment chart
             createGroupEnrollmentChart(groupAnalytics);
             
         } else {
@@ -605,16 +615,439 @@ jQuery(document).ready(function($) {
         }
     }
     
+    // Enhanced Group Enrollment Chart - Top 25 Implementation
+    function createGroupEnrollmentChart(data) {
+        const ctx = document.getElementById('group-enrollment-chart');
+        if (!ctx) return;
+        
+        if (window.groupChart) {
+            window.groupChart.destroy();
+        }
+        
+        if (!data || data.length === 0) {
+            $(ctx).closest('.wbcom-chart-container').html(`
+                <div class="text-center no-data-message" style="padding: 100px;">
+                    <h3>No Group Data Available</h3>
+                    <p>Create LearnDash groups and enroll users to see analytics here.</p>
+                    <p><small>Use LearnDash Testing Toolkit to generate test groups and enrollments.</small></p>
+                </div>
+            `);
+            return;
+        }
+        
+        // SOLUTION: Cap at top 25 groups by members
+        const top25Groups = data
+            .sort((a, b) => (b.total_users || 0) - (a.total_users || 0))
+            .slice(0, 25);
+        
+        // Show indicator if more groups exist
+        const hasMoreGroups = data.length > 25;
+        const remainingGroups = data.length - 25;
+        
+        const chartData = {
+            labels: top25Groups.map(group => {
+                const name = group.group_name.substring(0, 15);
+                return name + (group.group_name.length > 15 ? '...' : '');
+            }),
+            datasets: [{
+                label: 'Total Users',
+                data: top25Groups.map(group => group.total_users || 0),
+                backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 2
+            }, {
+                label: 'Active Users (30d)',
+                data: top25Groups.map(group => group.active_users_30d || 0),
+                backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 2
+            }, {
+                label: 'Completed Users',
+                data: top25Groups.map(group => group.completed_users || 0),
+                backgroundColor: 'rgba(46, 204, 113, 0.6)',
+                borderColor: 'rgba(46, 204, 113, 1)',
+                borderWidth: 2
+            }]
+        };
+        
+        window.groupChart = new Chart(ctx, {
+            type: 'bar',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: `Top 25 LearnDash Groups by Members${hasMoreGroups ? ` (${remainingGroups} more groups available)` : ''}`,
+                        font: {
+                            size: 16,
+                            weight: 'bold'
+                        }
+                    },
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 20
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            title: function(context) {
+                                const index = context[0].dataIndex;
+                                return top25Groups[index].group_name; // Full name in tooltip
+                            },
+                            afterBody: function(context) {
+                                const index = context[0].dataIndex;
+                                const group = top25Groups[index];
+                                return [
+                                    `Completion Rate: ${group.completion_rate || '0%'}`,
+                                    `Activity Rate: ${group.activity_rate || '0%'}`,
+                                    `Associated Courses: ${group.associated_courses || 0}`
+                                ];
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Groups (Top 25 by Member Count)'
+                        },
+                        ticks: {
+                            maxRotation: 45,
+                            minRotation: 45,
+                            font: {
+                                size: 10
+                            }
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Users'
+                        },
+                        ticks: {
+                            stepSize: 1
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
+        });
+        
+        // Add click handler for drill-down
+        ctx.onclick = function(event) {
+            const points = window.groupChart.getElementsAtEventForMode(event, 'nearest', { intersect: true }, true);
+            if (points.length) {
+                const firstPoint = points[0];
+                const group = top25Groups[firstPoint.index];
+                showGroupDrillDown(group.group_id, group.group_name);
+            }
+        };
+    }
+    
+    // Load enhanced group analytics
+    function loadGroupAnalytics() {
+        $.ajax({
+            url: wbcomReports.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'get_group_analytics',
+                nonce: wbcomReports.nonce,
+                include_trends: true,
+                include_distribution: true
+            },
+            success: function(response) {
+                if (response.success) {
+                    updateGroupAnalyticsDisplay(response.data);
+                } else {
+                    showErrorMessage('Failed to load group analytics');
+                }
+            },
+            error: function(xhr, status, error) {
+                showErrorMessage('Error loading group analytics: ' + error);
+            }
+        });
+    }
+    
+    function updateGroupAnalyticsDisplay(data) {
+        // Update quick stats
+        updateStatBox('.active-groups-count', data.active_groups_count);
+        updateStatBox('.very-active-groups-count', data.very_active_groups_count);
+        updateStatBox('.inactive-groups-count', data.inactive_groups_count);
+        updateStatBox('.avg-completion-rate', data.avg_completion_rate + '%');
+        
+        // Create activity distribution chart
+        createActivityDistributionChart(data.activity_distribution);
+        
+        // Create trends chart
+        createGroupTrendsChart(data.trends_data);
+        
+        // Update insights lists
+        updateTopPerformersList(data.top_performers);
+        updateNeedAttentionList(data.need_attention);
+        
+        // Update main enrollment chart with top 25
+        createGroupEnrollmentChart(data.top_25_groups);
+    }
+    
+    function createActivityDistributionChart(distributionData) {
+        const ctx = document.getElementById('group-activity-distribution-chart');
+        if (!ctx) return;
+        
+        if (window.activityDistributionChart) {
+            window.activityDistributionChart.destroy();
+        }
+        
+        const data = {
+            labels: ['Very Active (70%+)', 'Active (40-70%)', 'Moderate (20-40%)', 'Inactive (<20%)'],
+            datasets: [{
+                data: [
+                    distributionData.very_active || 0,
+                    distributionData.active || 0,
+                    distributionData.moderate || 0,
+                    distributionData.inactive || 0
+                ],
+                backgroundColor: [
+                    '#27ae60', // Green for very active
+                    '#2ecc71', // Light green for active  
+                    '#f39c12', // Orange for moderate
+                    '#e74c3c'  // Red for inactive
+                ],
+                borderWidth: 2
+            }]
+        };
+        
+        window.activityDistributionChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: data,
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Groups by Activity Level'
+                    },
+                    legend: {
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = total > 0 ? Math.round((context.parsed / total) * 100) : 0;
+                                return `${context.label}: ${context.parsed} groups (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    function createGroupTrendsChart(trendsData) {
+        const ctx = document.getElementById('group-trends-chart');
+        if (!ctx) return;
+        
+        if (window.groupTrendsChart) {
+            window.groupTrendsChart.destroy();
+        }
+        
+        window.groupTrendsChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: trendsData.months,
+                datasets: [{
+                    label: 'Active Groups',
+                    data: trendsData.active_groups,
+                    borderColor: '#2ecc71',
+                    backgroundColor: 'rgba(46, 204, 113, 0.1)',
+                    tension: 0.4
+                }, {
+                    label: 'Avg Completion Rate',
+                    data: trendsData.completion_rates,
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    tension: 0.4,
+                    yAxisID: 'y1'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Group Activity & Performance Trends'
+                    }
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Number of Active Groups'
+                        }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'Completion Rate (%)'
+                        },
+                        grid: {
+                            drawOnChartArea: false,
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    function updateTopPerformersList(performers) {
+        const $list = $('#top-performing-groups');
+        $list.empty();
+        
+        if (performers && performers.length > 0) {
+            performers.forEach(function(group, index) {
+                const item = `
+                    <div class="insight-item">
+                        <div class="insight-rank">#${index + 1}</div>
+                        <div class="insight-details">
+                            <strong>${escapeHtml(group.group_name)}</strong>
+                            <small>${group.total_users} users | ${group.completion_rate}% completion</small>
+                        </div>
+                        <div class="insight-score">${group.engagement_score}</div>
+                    </div>
+                `;
+                $list.append(item);
+            });
+        } else {
+            $list.append('<p><em>No top performers data available.</em></p>');
+        }
+    }
+    
+    function updateNeedAttentionList(groups) {
+        const $list = $('#groups-need-attention');
+        $list.empty();
+        
+        if (groups && groups.length > 0) {
+            groups.forEach(function(group, index) {
+                const item = `
+                    <div class="insight-item attention-item">
+                        <div class="insight-rank">⚠️</div>
+                        <div class="insight-details">
+                            <strong>${escapeHtml(group.group_name)}</strong>
+                            <small>${group.total_users} users | ${group.completion_rate}% completion</small>
+                        </div>
+                        <div class="insight-score">${group.engagement_score}</div>
+                    </div>
+                `;
+                $list.append(item);
+            });
+        } else {
+            $list.append('<p><em>No groups need immediate attention.</em></p>');
+        }
+    }
+    
+    // Group drill-down modal
+    function showGroupDrillDown(groupId, groupName) {
+        $.ajax({
+            url: wbcomReports.ajaxurl,
+            type: 'POST', 
+            data: {
+                action: 'get_group_drilldown',
+                nonce: wbcomReports.nonce,
+                group_id: groupId
+            },
+            success: function(response) {
+                if (response.success) {
+                    displayGroupDrillDownModal(response.data, groupName);
+                } else {
+                    showErrorMessage('Failed to load group details');
+                }
+            },
+            error: function(xhr, status, error) {
+                showErrorMessage('Error loading group details: ' + error);
+            }
+        });
+    }
+    
+    function displayGroupDrillDownModal(data, groupName) {
+        const modalHtml = `
+            <div id="group-drilldown-modal" class="group-modal-overlay">
+                <div class="group-modal-content">
+                    <div class="group-modal-header">
+                        <h2>Group Details: ${escapeHtml(groupName)}</h2>
+                        <button class="group-modal-close">&times;</button>
+                    </div>
+                    <div class="group-modal-body">
+                        <div class="group-stats-grid">
+                            <div class="group-stat">
+                                <label>Total Users:</label>
+                                <span>${data.total_users || 0}</span>
+                            </div>
+                            <div class="group-stat">
+                                <label>Active Users (30d):</label>
+                                <span>${data.active_users || 0}</span>
+                            </div>
+                            <div class="group-stat">
+                                <label>Completion Rate:</label>
+                                <span>${data.completion_rate || '0%'}</span>
+                            </div>
+                            <div class="group-stat">
+                                <label>Activity Level:</label>
+                                <span class="activity-level-${data.activity_level}">${data.activity_level || 'Unknown'}</span>
+                            </div>
+                        </div>
+                        <div class="group-details-tabs">
+                            <!-- Additional group details would go here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        $('body').append(modalHtml);
+        
+        $('#group-drilldown-modal .group-modal-close, #group-drilldown-modal').on('click', function(e) {
+            if (e.target === this) {
+                $('#group-drilldown-modal').remove();
+            }
+        });
+    }
+    
+    function loadFilteredGroups() {
+        // Implementation for loading filtered groups with pagination
+        // This would call a new AJAX endpoint to get filtered group data
+    }
+    
+    function exportGroupInsights() {
+        // Implementation for exporting group insights
+        // This would trigger CSV download of current group analytics
+    }
+    
     function createCourseCompletionChart(data) {
         const ctx = document.getElementById('course-completion-chart');
         if (!ctx) return;
         
-        // Destroy existing chart
         if (completionChart) {
             completionChart.destroy();
         }
         
-        // Handle empty data
         if (!data || data.length === 0) {
             $(ctx).closest('.wbcom-chart-container').html(`
                 <div class="text-center no-data-message" style="padding: 100px;">
@@ -676,77 +1109,6 @@ jQuery(document).ready(function($) {
         });
     }
     
-    function createGroupEnrollmentChart(data) {
-        const ctx = document.getElementById('group-enrollment-chart');
-        if (!ctx) return;
-        
-        // Destroy existing chart
-        if (window.groupChart) {
-            window.groupChart.destroy();
-        }
-        
-        // Handle empty data
-        if (!data || data.length === 0) {
-            $(ctx).closest('.wbcom-chart-container').html(`
-                <div class="text-center no-data-message" style="padding: 100px;">
-                    <h3>No Group Data Available</h3>
-                    <p>Create LearnDash groups and enroll users to see analytics here.</p>
-                    <p><small>Use LearnDash Testing Toolkit to generate test groups and enrollments.</small></p>
-                </div>
-            `);
-            return;
-        }
-        
-        const chartData = {
-            labels: data.map(group => group.group_name.substring(0, 20) + (group.group_name.length > 20 ? '...' : '')),
-            datasets: [{
-                label: 'Total Users',
-                data: data.map(group => group.total_users || 0),
-                backgroundColor: 'rgba(54, 162, 235, 0.5)',
-                borderColor: 'rgba(54, 162, 235, 1)',
-                borderWidth: 2
-            }, {
-                label: 'Completed Users',
-                data: data.map(group => group.completed_users || 0),
-                backgroundColor: 'rgba(75, 192, 192, 0.5)',
-                borderColor: 'rgba(75, 192, 192, 1)',
-                borderWidth: 2
-            }, {
-                label: 'Associated Courses',
-                data: data.map(group => group.associated_courses || 0),
-                backgroundColor: 'rgba(255, 206, 86, 0.5)',
-                borderColor: 'rgba(255, 206, 86, 1)',
-                borderWidth: 2
-            }]
-        };
-        
-        window.groupChart = new Chart(ctx, {
-            type: 'bar',
-            data: chartData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'LearnDash Group Enrollment Overview'
-                    },
-                    legend: {
-                        position: 'top'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            stepSize: 1
-                        }
-                    }
-                }
-            }
-        });
-    }
-    
     function applyLearningFilters() {
         currentFilter = $('#progress-filter').val();
         currentCourseFilter = $('#course-filter').val();
@@ -765,7 +1127,6 @@ jQuery(document).ready(function($) {
         const $button = $('#export-learndash-stats');
         $button.prop('disabled', true).text('Exporting...');
         
-        // Create download form
         const form = $('<form>', {
             method: 'POST',
             action: wbcomReports.ajaxurl
@@ -822,6 +1183,7 @@ jQuery(document).ready(function($) {
             case 'active': return 'status-active';
             case 'empty': return 'status-empty';
             case 'no courses': return 'status-no-courses';
+            case 'needs attention': return 'status-attention';
             default: return 'status-default';
         }
     }
@@ -975,6 +1337,7 @@ jQuery(document).ready(function($) {
                 .status-active { background: #46b450; color: white; }
                 .status-empty { background: #dc3232; color: white; }
                 .status-no-courses { background: #ffb900; color: white; }
+                .status-attention { background: #e67e22; color: white; }
                 .status-default { background: #666; color: white; }
                 .status-badge {
                     padding: 2px 8px;
@@ -984,34 +1347,119 @@ jQuery(document).ready(function($) {
                     text-transform: uppercase;
                 }
                 
-                /* Index Status Styles */
-                .wbcom-index-status {
-                    background: #f8f9fa;
-                    border: 1px solid #e1e1e1;
-                    border-radius: 4px;
-                    padding: 15px;
-                    margin-bottom: 20px;
-                }
-                .index-details p {
-                    margin: 5px 0;
-                }
-                .cache-enabled {
-                    color: #46b450;
-                    font-weight: bold;
-                }
-                .cache-disabled {
-                    color: #ffb900;
-                    font-weight: bold;
-                }
-                .needs-rebuild {
-                    background-color: #ff6b6b !important;
-                    color: white !important;
-                }
-                .needs-rebuild:hover {
-                    background-color: #ff5252 !important;
+                /* Enhanced Group Analytics Styles */
+                .insight-item {
+                    display: flex;
+                    align-items: center;
+                    padding: 10px;
+                    border-bottom: 1px solid #eee;
+                    transition: background-color 0.2s ease;
                 }
                 
-                /* Progress Bar Styles */
+                .insight-item:hover {
+                    background-color: #f8f9fa;
+                }
+                
+                .insight-rank {
+                    font-weight: bold;
+                    color: #0073aa;
+                    margin-right: 10px;
+                    min-width: 30px;
+                }
+                
+                .insight-details {
+                    flex: 1;
+                }
+                
+                .insight-details strong {
+                    display: block;
+                    margin-bottom: 2px;
+                }
+                
+                .insight-details small {
+                    color: #666;
+                    font-size: 12px;
+                }
+                
+                .insight-score {
+                    font-weight: bold;
+                    color: #2ecc71;
+                }
+                
+                .attention-item .insight-score {
+                    color: #e74c3c;
+                }
+                
+                /* Group Modal Styles */
+                .group-modal-overlay {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.5);
+                    z-index: 100000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                
+                .group-modal-content {
+                    background: white;
+                    border-radius: 8px;
+                    max-width: 600px;
+                    width: 90%;
+                    max-height: 80vh;
+                    overflow-y: auto;
+                }
+                
+                .group-modal-header {
+                    padding: 20px;
+                    border-bottom: 1px solid #eee;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                
+                .group-modal-close {
+                    background: none;
+                    border: none;
+                    font-size: 24px;
+                    cursor: pointer;
+                    color: #666;
+                }
+                
+                .group-modal-body {
+                    padding: 20px;
+                }
+                
+                .group-stats-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                    gap: 15px;
+                    margin-bottom: 20px;
+                }
+                
+                .group-stat {
+                    padding: 10px;
+                    background: #f8f9fa;
+                    border-radius: 4px;
+                }
+                
+                .group-stat label {
+                    display: block;
+                    font-size: 12px;
+                    color: #666;
+                    margin-bottom: 5px;
+                }
+                
+                .group-stat span {
+                    font-weight: bold;
+                    font-size: 16px;
+                    color: #1d2327;
+                }
+                
+                /* Index Status Styles */
                 .wbcom-index-progress {
                     background: #fff;
                     border: 1px solid #0073aa;
