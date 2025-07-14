@@ -301,7 +301,7 @@ class Wbcom_Reports_LearnDash {
                                     <!-- Activity Distribution Chart -->
                                     <div class="activity-distribution-container">
                                         <h3><?php _e('Group Activity Distribution', 'wbcom-reports'); ?></h3>
-                                        <div class="chart-container">
+                                        <div class="chart-container-pie">
                                             <canvas id="group-activity-distribution-chart"></canvas>
                                         </div>
                                     </div>
@@ -506,6 +506,13 @@ class Wbcom_Reports_LearnDash {
             position: relative;
         }
         
+        /* Fixed height for pie chart */
+        .chart-container-pie {
+            height: 400px;
+            max-height: 400px;
+            position: relative;
+        }
+        
         .group-insights-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -694,6 +701,172 @@ class Wbcom_Reports_LearnDash {
             wp_send_json_error('Error loading group analytics: ' . $e->getMessage());
         }
     }
+    
+    /**
+     * Calculate course analytics using improved enrollment counting
+     */
+    private function calculate_course_analytics() {
+        global $wpdb;
+        
+        $course_post_type = 'sfwd-courses';
+        if (function_exists('learndash_get_post_type_slug')) {
+            $course_post_type = learndash_get_post_type_slug('course');
+        }
+        
+        $courses = get_posts(array(
+            'post_type' => $course_post_type,
+            'numberposts' => -1,
+            'post_status' => 'publish'
+        ));
+        
+        if (empty($courses)) {
+            return array();
+        }
+        
+        $analytics = array();
+        
+        foreach ($courses as $course) {
+            // Count enrollments using multiple methods for accuracy
+            $enrolled_count = $this->get_accurate_course_enrollment_count($course->ID);
+            $completed_count = $this->get_course_completion_count($course->ID);
+            
+            $analytics[] = array(
+                'course_name' => $course->post_title,
+                'enrolled_users' => $enrolled_count,
+                'completed' => $completed_count,
+                'in_progress' => max(0, $enrolled_count - $completed_count),
+                'completion_rate' => $enrolled_count > 0 ? round(($completed_count / $enrolled_count) * 100, 1) . '%' : '0%'
+            );
+        }
+        
+        return $analytics;
+    }
+    
+    /**
+     * Get accurate course enrollment count using multiple data sources
+     */
+    private function get_accurate_course_enrollment_count($course_id) {
+        global $wpdb;
+        
+        $total_enrolled = 0;
+        
+        // Method 1: Count LDTT progress entries
+        $ldtt_enrolled = $wpdb->get_var($wpdb->prepare("
+            SELECT COUNT(DISTINCT user_id) 
+            FROM {$wpdb->usermeta} 
+            WHERE meta_key = %s
+        ", '_ldtt_progress_course_' . $course_id));
+        
+        // Method 2: Count regular LearnDash course access
+        $ld_enrolled = $wpdb->get_var($wpdb->prepare("
+            SELECT COUNT(DISTINCT user_id) 
+            FROM {$wpdb->usermeta} 
+            WHERE meta_key = '_sfwd-course_progress' 
+            AND meta_value LIKE %s
+        ", '%"' . $course_id . '"%'));
+        
+        // Method 3: Count course access entries
+        $course_access = $wpdb->get_var($wpdb->prepare("
+            SELECT COUNT(DISTINCT user_id) 
+            FROM {$wpdb->usermeta} 
+            WHERE meta_key = %s 
+            AND meta_value = %s
+        ", 'course_' . $course_id . '_access_from', 'ANY'));
+        
+        // Method 4: Count from our index table if available
+        $index_table = $wpdb->prefix . 'wbcom_reports_index';
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$index_table}'") == $index_table) {
+            // This would require storing per-course enrollment data in the index
+            // For now, we'll use the other methods
+        }
+        
+        // Use the highest count to ensure we capture all enrollments
+        $total_enrolled = max($ldtt_enrolled, $ld_enrolled, $course_access);
+        
+        // Additional check: Look for any user who has any progress on this course
+        $any_progress = $wpdb->get_var($wpdb->prepare("
+            SELECT COUNT(DISTINCT user_id) 
+            FROM {$wpdb->usermeta} 
+            WHERE (meta_key = %s OR meta_key LIKE %s OR meta_key LIKE %s)
+        ", 
+            '_ldtt_progress_course_' . $course_id,
+            'course_' . $course_id . '_%',
+            '%course_completed_' . $course_id
+        ));
+        
+        // Use the maximum to ensure we don't miss anyone
+        $total_enrolled = max($total_enrolled, $any_progress);
+        
+        return intval($total_enrolled);
+    }
+    
+    /**
+     * Get course completion count
+     */
+    private function get_course_completion_count($course_id) {
+        global $wpdb;
+        
+        $completed_count = 0;
+        
+        // Method 1: Check LDTT progress with 100% completion
+        $ldtt_completed = $wpdb->get_var($wpdb->prepare("
+            SELECT COUNT(DISTINCT user_id) 
+            FROM {$wpdb->usermeta} 
+            WHERE meta_key = %s 
+            AND meta_value LIKE %s
+        ", '_ldtt_progress_course_' . $course_id, '%"completion_rate";i:100%'));
+        
+        // Method 2: Check course completion meta
+        $ld_completed = $wpdb->get_var($wpdb->prepare("
+            SELECT COUNT(DISTINCT user_id) 
+            FROM {$wpdb->usermeta} 
+            WHERE meta_key = %s
+        ", 'course_completed_' . $course_id));
+        
+        // Method 3: Check course progress with 100% completion
+        $progress_completed = $wpdb->get_results($wpdb->prepare("
+            SELECT user_id, meta_value 
+            FROM {$wpdb->usermeta} 
+            WHERE meta_key = '_sfwd-course_progress' 
+            AND meta_value LIKE %s
+        ", '%"' . $course_id . '"%'));
+        
+        $progress_completed_count = 0;
+        foreach ($progress_completed as $progress) {
+            $progress_data = maybe_unserialize($progress->meta_value);
+            if (is_array($progress_data) && isset($progress_data[$course_id])) {
+                $course_progress = $progress_data[$course_id];
+                if (isset($course_progress['completed']) && isset($course_progress['total']) && 
+                    $course_progress['total'] > 0 && 
+                    $course_progress['completed'] >= $course_progress['total']) {
+                    $progress_completed_count++;
+                }
+            }
+        }
+        
+        // Use the highest count
+        $completed_count = max($ldtt_completed, $ld_completed, $progress_completed_count);
+        
+        return intval($completed_count);
+    }
+    
+    /**
+     * Get cached course analytics
+     */
+    private function get_cached_course_analytics() {
+        $cache_key = 'course_analytics';
+        $analytics = wp_cache_get($cache_key, $this->cache_group);
+        
+        if ($analytics === false) {
+            $analytics = $this->calculate_course_analytics();
+            wp_cache_set($cache_key, $analytics, $this->cache_group, 1800);
+        }
+        
+        return $analytics;
+    }
+    
+    // Continue with all other existing methods...
+    // (I'll include the rest of the methods to ensure completeness)
     
     /**
      * Calculate if a group is considered "active"
@@ -1093,9 +1266,6 @@ class Wbcom_Reports_LearnDash {
         return $groups;
     }
     
-    // Keep all other existing methods from the original class...
-    // (get_cached_total_courses, get_cached_total_lessons, etc.)
-    
     /**
      * Get cached total courses
      */
@@ -1310,81 +1480,6 @@ class Wbcom_Reports_LearnDash {
         }
         
         return false;
-    }
-    
-    /**
-     * Get cached course analytics
-     */
-    private function get_cached_course_analytics() {
-        $cache_key = 'course_analytics';
-        $analytics = wp_cache_get($cache_key, $this->cache_group);
-        
-        if ($analytics === false) {
-            $analytics = $this->calculate_course_analytics();
-            wp_cache_set($cache_key, $analytics, $this->cache_group, 1800);
-        }
-        
-        return $analytics;
-    }
-    
-    /**
-     * Calculate course analytics using indexed data
-     */
-    private function calculate_course_analytics() {
-        global $wpdb;
-        $index_table = $wpdb->prefix . 'wbcom_reports_index';
-        
-        $course_post_type = 'sfwd-courses';
-        if (function_exists('learndash_get_post_type_slug')) {
-            $course_post_type = learndash_get_post_type_slug('course');
-        }
-        
-        $courses = get_posts(array(
-            'post_type' => $course_post_type,
-            'numberposts' => -1,
-            'post_status' => 'publish'
-        ));
-        
-        if (empty($courses)) {
-            return array();
-        }
-        
-        $analytics = array();
-        
-        foreach ($courses as $course) {
-            $enrolled_users = $this->get_course_enrolled_users_from_index($course->ID);
-            $completed_users = $this->get_course_completed_users_from_index($course->ID);
-            $enrolled_count = count($enrolled_users);
-            $completed_count = count($completed_users);
-            
-            $analytics[] = array(
-                'course_name' => $course->post_title,
-                'enrolled_users' => $enrolled_count,
-                'completed' => $completed_count,
-                'in_progress' => max(0, $enrolled_count - $completed_count),
-                'completion_rate' => $enrolled_count > 0 ? round(($completed_count / $enrolled_count) * 100, 1) . '%' : '0%'
-            );
-        }
-        
-        return $analytics;
-    }
-    
-    /**
-     * Get course enrolled users from index
-     */
-    private function get_course_enrolled_users_from_index($course_id) {
-        // This would query the index table for users with this course
-        // Implementation depends on how you want to store course enrollment in the index
-        return array(); // Placeholder
-    }
-    
-    /**
-     * Get course completed users from index
-     */
-    private function get_course_completed_users_from_index($course_id) {
-        // This would query the index table for users who completed this course
-        // Implementation depends on how you want to store course completion in the index
-        return array(); // Placeholder
     }
     
     /**

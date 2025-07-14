@@ -833,6 +833,7 @@ jQuery(document).ready(function($) {
             data: data,
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
                     title: {
                         display: true,
@@ -884,6 +885,7 @@ jQuery(document).ready(function($) {
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
                     title: {
                         display: true,
@@ -1360,6 +1362,10 @@ jQuery(document).ready(function($) {
                     background-color: #f8f9fa;
                 }
                 
+                .insight-item:last-child {
+                    border-bottom: none;
+                }
+                
                 .insight-rank {
                     font-weight: bold;
                     color: #0073aa;
@@ -1429,6 +1435,10 @@ jQuery(document).ready(function($) {
                     color: #666;
                 }
                 
+                .group-modal-close:hover {
+                    color: #dc3232;
+                }
+                
                 .group-modal-body {
                     padding: 20px;
                 }
@@ -1457,6 +1467,27 @@ jQuery(document).ready(function($) {
                     font-weight: bold;
                     font-size: 16px;
                     color: #1d2327;
+                }
+                
+                /* Activity Level Indicators */
+                .activity-level-very_active {
+                    color: #27ae60;
+                    font-weight: bold;
+                }
+                
+                .activity-level-active {
+                    color: #2ecc71;
+                    font-weight: bold;
+                }
+                
+                .activity-level-moderate {
+                    color: #f39c12;
+                    font-weight: bold;
+                }
+                
+                .activity-level-inactive {
+                    color: #e74c3c;
+                    font-weight: bold;
                 }
                 
                 /* Index Status Styles */
@@ -1577,6 +1608,40 @@ jQuery(document).ready(function($) {
                 }
                 .user-edit-link:hover .dashicons {
                     opacity: 1;
+                }
+                
+                /* Fixed height for pie chart container */
+                .chart-container-pie {
+                    height: 400px;
+                    max-height: 400px;
+                    position: relative;
+                    margin: 0 auto;
+                    width: 100%;
+                }
+                
+                /* Mobile Responsiveness */
+                @media (max-width: 768px) {
+                    .search-controls {
+                        flex-direction: column;
+                        align-items: stretch;
+                    }
+                    .search-input-wrapper {
+                        min-width: 100%;
+                    }
+                    .group-modal-content {
+                        width: 95%;
+                    }
+                    .group-stats-grid {
+                        grid-template-columns: 1fr;
+                    }
+                    .chart-container-pie {
+                        height: 300px;
+                        max-height: 300px;
+                    }
+                    .chart-container {
+                        height: 250px;
+                        max-height: 250px;
+                    }
                 }
             </style>
         `);
